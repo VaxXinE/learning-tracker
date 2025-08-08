@@ -56,7 +56,7 @@ function StatCard({
 }: { 
   title: string; 
   value: string | number; 
-  icon: any;
+  icon: React.ComponentType<{ size: number }>;
   trend?: string;
   color?: "blue" | "green" | "orange" | "purple";
   subtitle?: string;
@@ -417,7 +417,7 @@ export default function Dashboard() {
                 <span className="font-semibold text-green-800">Achievement</span>
               </div>
               <p className="text-sm text-green-700">
-                Great job! You've completed {kpi.completedCourses} courses.
+                Great job! You&apos;ve completed {kpi.completedCourses} courses.
               </p>
             </div>
           </div>
