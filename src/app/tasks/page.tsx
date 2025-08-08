@@ -61,105 +61,6 @@ interface Stats {
   productivity: number;
 }
 
-// Mock data for demonstration
-const mockTasks: Task[] = [
-  {
-    id: '1',
-    title: 'Complete React Hooks Tutorial',
-    description: 'Go through the advanced React hooks patterns and implement custom hooks for the project.',
-    status: 'todo',
-    priority: 'high',
-    tags: ['react', 'learning', 'frontend'],
-    dueDate: '2024-08-10',
-    estimatedTime: 120,
-    completedTime: 0,
-    createdAt: '2024-08-08',
-    assignee: 'Alex',
-    subtasks: [
-      { id: 's1', title: 'Watch tutorial videos', completed: false },
-      { id: 's2', title: 'Practice with examples', completed: false },
-      { id: 's3', title: 'Build demo project', completed: false }
-    ]
-  },
-  {
-    id: '2',
-    title: 'Design System Documentation',
-    description: 'Create comprehensive documentation for the design system components and usage guidelines.',
-    status: 'in_progress',
-    priority: 'medium',
-    tags: ['design', 'documentation', 'ui'],
-    dueDate: '2024-08-12',
-    estimatedTime: 90,
-    completedTime: 45,
-    createdAt: '2024-08-07',
-    assignee: 'Alex',
-    subtasks: [
-      { id: 's4', title: 'Gather component specs', completed: true },
-      { id: 's5', title: 'Write usage examples', completed: false },
-      { id: 's6', title: 'Create visual guide', completed: false }
-    ]
-  },
-  {
-    id: '3',
-    title: 'API Integration Testing',
-    description: 'Test all API endpoints and ensure proper error handling across the application.',
-    status: 'done',
-    priority: 'high',
-    tags: ['backend', 'testing', 'api'],
-    dueDate: '2024-08-08',
-    estimatedTime: 60,
-    completedTime: 60,
-    createdAt: '2024-08-06',
-    assignee: 'Alex',
-    subtasks: [
-      { id: 's7', title: 'Test GET endpoints', completed: true },
-      { id: 's8', title: 'Test POST endpoints', completed: true },
-      { id: 's9', title: 'Error handling tests', completed: true }
-    ]
-  },
-  {
-    id: '4',
-    title: 'Database Migration Script',
-    description: 'Create and test database migration scripts for the new user authentication system.',
-    status: 'todo',
-    priority: 'low',
-    tags: ['database', 'migration', 'backend'],
-    dueDate: '2024-08-15',
-    estimatedTime: 150,
-    completedTime: 0,
-    createdAt: '2024-08-08',
-    assignee: 'Alex',
-    subtasks: [
-      { id: 's10', title: 'Design migration plan', completed: false },
-      { id: 's11', title: 'Write migration scripts', completed: false },
-      { id: 's12', title: 'Test on staging', completed: false }
-    ]
-  },
-  {
-    id: '5',
-    title: 'Mobile Responsive Testing',
-    description: 'Test and optimize the application for various mobile devices and screen sizes.',
-    status: 'in_progress',
-    priority: 'medium',
-    tags: ['frontend', 'mobile', 'testing'],
-    dueDate: '2024-08-14',
-    estimatedTime: 80,
-    completedTime: 20,
-    createdAt: '2024-08-07',
-    assignee: 'Alex',
-    subtasks: [
-      { id: 's13', title: 'Test on iOS devices', completed: true },
-      { id: 's14', title: 'Test on Android devices', completed: false },
-      { id: 's15', title: 'Fix responsive issues', completed: false }
-    ]
-  }
-];
-
-const mockUser = {
-  email: 'vixangie24@gmail.com',
-  name: 'Alex'
-};
-
 // Pomodoro Timer Component
 const PomodoroTimer: React.FC = () => {
   const [timeLeft, setTimeLeft] = useState<number>(25 * 60); // 25 minutes in seconds
@@ -276,7 +177,8 @@ export default function EnhancedTasksUI(): React.ReactElement {
     tags: ''
   });
 
-  const statusColumns: StatusColumn[] = [
+  // Memoize the statusColumns to prevent unnecessary recalculations
+  const statusColumns = useMemo<StatusColumn[]>(() => [
     { 
       key: 'todo', 
       title: 'To Do', 
@@ -301,24 +203,11 @@ export default function EnhancedTasksUI(): React.ReactElement {
       bgColor: 'bg-green-500/20',
       borderColor: 'border-green-500/30'
     }
-  ];
+  ], []); // Empty dependency array ensures this is only computed once
 
-  const priorityOptions: PriorityOption[] = [
-    { value: 'low', label: 'Low', color: 'blue' },
-    { value: 'medium', label: 'Medium', color: 'amber' },
-    { value: 'high', label: 'High', color: 'red' }
-  ];
-
-  const allTags = useMemo<string[]>(() => {
-    const tagSet = new Set<string>();
-    tasks.forEach(task => {
-      task.tags.forEach(tag => tagSet.add(tag));
-    });
-    return Array.from(tagSet);
-  }, [tasks]);
-
+  // Filter tasks based on selected criteria
   const filteredTasks = useMemo<Task[]>(() => {
-    let filtered = tasks.filter(task => {
+    const filtered: Task[] = tasks.filter(task => {
       const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            task.description.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesTag = !selectedTag || task.tags.includes(selectedTag);
