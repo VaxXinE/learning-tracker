@@ -30,7 +30,7 @@ function StatCard({
 }: { 
   title: string; 
   value: string | number; 
-  icon: any;
+  icon: React.ComponentType<{ size: number }>; // Updated icon type
   trend?: string;
   color?: "blue" | "green" | "orange" | "purple";
   subtitle?: string;
@@ -305,12 +305,12 @@ export default function FirebaseDashboard() {
                 <AreaChart data={trendData}>
                   <defs>
                     <linearGradient id="completedGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="totalGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#cbd5e1" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#cbd5e1" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#cbd5e1" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#cbd5e1" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -352,7 +352,7 @@ export default function FirebaseDashboard() {
               </ResponsiveContainer>
             </div>
           </div>
-
+          
           {/* Progress Overview */}
           <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg p-6 border border-white/20">
             <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center gap-2">
