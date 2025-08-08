@@ -6,10 +6,16 @@ import { LessonService, Lesson } from '@/lib/firebase/lessons';
 import { CourseService } from '@/lib/firebase/courses';
 import { Plus, Search, Trash2, Clock } from 'lucide-react';
 
+interface Course {
+  id: string;
+  title: string;
+  // Add other properties for the course as needed
+}
+
 export default function LessonsPage() {
   const { user } = useAuth();
   const [lessons, setLessons] = useState<Lesson[]>([]);
-  const [courses, setCourses] = useState<any[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]); // Memperbaiki tipe untuk courses
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
