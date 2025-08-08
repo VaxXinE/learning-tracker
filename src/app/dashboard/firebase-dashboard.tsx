@@ -387,9 +387,9 @@ export default function FirebaseDashboard() {
                 <Award className="text-green-600" size={20} />
                 <span className="font-semibold text-green-800">Achievement</span>
               </div>
-              <p className="text-sm text-green-700">
-                Great job! You've completed {kpi.completedCourses} courses.
-              </p>
+                <p className="text-sm text-green-700">
+                  Great job! You&apos;ve completed {kpi.completedCourses} courses.
+                </p>
             </div>
           </div>
         </div>
