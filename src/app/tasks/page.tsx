@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, DragEvent, ChangeEvent } from 'react';
-import { Search, Plus, CheckCircle2, Circle, PlayCircle, Clock, Calendar, Tag, AlertCircle, MoreVertical, Filter, Trash2, Edit3, Timer, Play, Pause, RotateCcw, Zap, Target, TrendingUp, Award, Users, Flame } from 'lucide-react';
+import { Search, Plus, CheckCircle2, Circle, PlayCircle, Clock, Calendar, Tag, AlertCircle, MoreVertical, Trash2, Edit3, Timer, Play, Pause, RotateCcw, Zap, Target, TrendingUp, Award, Users, Flame } from 'lucide-react';
 
 interface Task {
   id: string;
@@ -350,7 +350,7 @@ export default function EnhancedTasksUI(): React.ReactElement {
       grouped[column.key] = filteredTasks.filter(task => task.status === column.key);
     });
     return grouped;
-  }, [filteredTasks]);
+  }, [filteredTasks, statusColumns]);
 
   const stats = useMemo<Stats>(() => {
     const total = tasks.length;

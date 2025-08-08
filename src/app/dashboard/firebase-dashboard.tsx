@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
-  AreaChart, Area
+  AreaChart, Area, CartesianGrid, XAxis, YAxis
 } from 'recharts';
 import { 
   BookOpen, 
@@ -17,34 +17,8 @@ import {
 } from 'lucide-react';
 import { CourseService } from '@/lib/firebase/courses';
 import { TaskService } from '@/lib/firebase/tasks';
-import { Timestamp } from 'firebase/firestore';
-
-interface Course {
-  id: string;
-  title: string;
-  description: string;
-  category: string;
-  difficulty: string;
-  lessonsCount: number;
-  completedLessons: number;
-  estimatedHours: number;
-  lastAccessed: string;
-  progress: number;
-  featured: boolean;
-  createdAt?: Timestamp;
-  userId: string;
-}
-
-interface Task {
-  id: string;
-  title: string;
-  description: string;
-  dueDate: Timestamp;
-  status: 'todo' | 'in_progress' | 'done';
-  priority: 'low' | 'medium' | 'high';
-  userId: string;
-  createdAt?: Timestamp;
-}
+import type { Course } from '@/lib/firebase/courses';
+import type { Task } from '@/lib/firebase/tasks';
 
 function StatCard({ 
   title, 
