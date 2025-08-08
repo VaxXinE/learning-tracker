@@ -38,12 +38,12 @@ export default function EnhancedCoursesUI() {
   }, [user]);
 
   const filteredAndSortedCourses = React.useMemo(() => {
-    let filtered = courses.filter(course => {
-      const matchesSearch = course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           course.description.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesCategory = selectedCategory === 'All' || course.category === selectedCategory;
-      return matchesSearch && matchesCategory;
-    });
+  const filtered = courses.filter(course => {
+    const matchesSearch = course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         course.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = selectedCategory === 'All' || course.category === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
 
     return filtered.sort((a, b) => {
       switch (sortBy) {
