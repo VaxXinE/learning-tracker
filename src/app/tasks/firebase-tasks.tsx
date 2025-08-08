@@ -55,16 +55,6 @@ export default function FirebaseTasksPage() {
   const [selectedPriority, setSelectedPriority] = useState<string>('All');
   const [selectedStatus, setSelectedStatus] = useState<string>('All');
   const [sortBy, setSortBy] = useState<string>('dueDate');
-  const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [newTask, setNewTask] = useState<TaskInput>({
-    title: '',
-    description: '',
-    dueDate: new Date().toISOString().split('T')[0],
-    priority: 'medium',
-    estimatedTime: 60,
-    tags: []
-  });
 
   // Status columns configuration
   const statusColumns = [
@@ -158,75 +148,6 @@ export default function FirebaseTasksPage() {
     return grouped;
   }, [filteredTasks]);
 
-  // Handle create task
-  const handleCreateTask = async () => {
-    if (!user || !newTask.title.trim()) return;
-
-    try {
-      await TaskService.createTask(
-        {
-          title: newTask.title,
-          description: newTask.description,
-          dueDate: new Date(newTask.dueDate),
-          priority: newTask.priority,
-        },
-        user.uid
-      );
-      
-      setNewTask({
-        title: '',
-        description: '',
-        dueDate: new Date().toISOString().split('T')[0],
-        priority: 'medium',
-        estimatedTime: 60,
-        tags: []
-      });
-      setShowCreateModal(false);
-    } catch (error) {
-      console.error('Error creating task:', error);
-      setError('Failed to create task');
-    }
-  };
-
-  // Handle update task
-  const handleUpdateTask = async (taskId: string, updates: Partial<Task>) => {
-    if (!user) return;
-
-    try {
-      const firebaseUpdates: Partial<FirebaseTask> = {};
-
-      // Only include properties that exist in FirebaseTask
-      if (updates.title !== undefined) firebaseUpdates.title = updates.title;
-      if (updates.description !== undefined) firebaseUpdates.description = updates.description;
-      if (updates.status !== undefined) firebaseUpdates.status = updates.status;
-      if (updates.priority !== undefined) firebaseUpdates.priority = updates.priority;
-      if (updates.tags !== undefined) firebaseUpdates.tags = updates.tags;
-      if (updates.estimatedTime !== undefined) firebaseUpdates.estimatedTime = updates.estimatedTime;
-      
-      // Convert string dates to Timestamps
-      if (updates.dueDate !== undefined) {
-        firebaseUpdates.dueDate = stringToTimestamp(updates.dueDate);
-      }
-
-      await TaskService.updateTask(taskId, firebaseUpdates);
-    } catch (error) {
-      console.error('Error updating task:', error);
-      setError('Failed to update task');
-    }
-  };
-
-  // Handle delete task
-  const handleDeleteTask = async (taskId: string) => {
-    if (!user) return;
-
-    try {
-      await TaskService.deleteTask(taskId);
-    } catch (error) {
-      console.error('Error deleting task:', error);
-      setError('Failed to delete task');
-    }
-  };
-
   // Loading state
   if (loading) {
     return (
@@ -304,6 +225,7 @@ export default function FirebaseTasksPage() {
                     />
                   </div>
                   
+
                   <div className="flex gap-2">
                     <select
                       value={selectedPriority}
@@ -332,7 +254,6 @@ export default function FirebaseTasksPage() {
                 {/* Action Buttons */}
                 <div className="flex gap-3">
                   <button
-                    onClick={() => setShowCreateModal(true)}
                     className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 rounded-xl transition-all duration-200 flex items-center gap-2 font-semibold"
                   >
                     <Plus className="w-4 h-4" />
@@ -359,6 +280,7 @@ export default function FirebaseTasksPage() {
                     </div>
                   </div>
                   
+
                   <div className="space-y-4">
                     {tasksByStatus[column.key]?.map(task => (
                       <div key={task.id} className="bg-slate-700/50 rounded-lg p-4">
