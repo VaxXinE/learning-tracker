@@ -4,6 +4,7 @@ import { auth, googleProvider } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useState } from 'react';
+import { FirebaseError } from 'firebase/app'; // Import FirebaseError
 
 export default function Login() {
   const r = useRouter();
@@ -13,8 +14,16 @@ export default function Login() {
     const fd = new FormData(e.currentTarget);
     const email = String(fd.get('email'));
     const password = String(fd.get('password'));
-    try { await signInWithEmailAndPassword(auth, email, password); r.push('/dashboard'); }
-    catch (err: any) { setError(err.message); }
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      r.push('/dashboard');
+    } catch (err: unknown) { // Type the error as `unknown` first
+      if (err instanceof FirebaseError) {
+        setError(err.message); // Safely access the error message
+      } else {
+        setError('An unexpected error occurred'); // Handle non-Firebase errors
+      }
+    }
   }
   return (
     <div className="container">
