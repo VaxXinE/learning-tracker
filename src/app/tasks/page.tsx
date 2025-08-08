@@ -451,6 +451,15 @@ export default function EnhancedTasksUI(): React.ReactElement {
     return `${mins}m`;
   };
 
+  const formatDate = (date: string): string => {
+    const d = new Date(date);
+    return d.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+  };
+
   const TaskCard: React.FC<TaskCardProps> = ({ task }) => {
     const daysUntilDue = getDaysUntilDue(task.dueDate);
     const isOverdue = daysUntilDue < 0 && task.status !== 'done';
@@ -522,7 +531,7 @@ export default function EnhancedTasksUI(): React.ReactElement {
               isDueSoon ? 'text-amber-400' :
               'text-slate-400'
             }>
-              {new Date(task.dueDate).toLocaleDateString()}
+              {formatDate(task.dueDate)}
             </span>
           </div>
           <div className="flex items-center gap-1">

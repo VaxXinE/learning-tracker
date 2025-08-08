@@ -24,6 +24,8 @@ export interface Task {
   userId: string;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
+  tags?: string[];
+  estimatedTime?: number; // in minutes
 }
 
 export interface TaskInput {
