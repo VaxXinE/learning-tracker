@@ -33,6 +33,8 @@ export interface TaskInput {
   description: string;
   dueDate: Date;
   priority: 'low' | 'medium' | 'high';
+  estimatedTime?: number;
+  tags?: string[];
 }
 
 export class TaskService {
@@ -51,7 +53,13 @@ export class TaskService {
 
   static async createTask(taskData: TaskInput, userId: string): Promise<string> {
     const docRef = await addDoc(collection(db, this.collectionName), {
-      ...taskData,
+      title: taskData.title,
+      description: taskData.description,
+      priority: taskData.priority,
+      dueDate: taskData.dueDate,
+      estimatedTime: taskData.estimatedTime || 60,
+      tags: taskData.tags || [],
+      status: 'todo',
       userId,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()

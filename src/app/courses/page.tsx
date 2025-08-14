@@ -1,79 +1,176 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Search, Plus, BookOpen, Trash2, Edit3, Eye, Calendar, Clock, Star, Filter } from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import {
+  Search, Plus, BookOpen, Trash2, Edit3, Eye, Calendar, Clock, Star, Filter,
+} from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { Course, CourseService } from '@/lib/firebase/courses';
+import { Lesson, LessonService } from '@/lib/firebase/lessons';
 import { useAuth } from '@/components/AuthProvider';
 
+type Difficulty = 'Beginner' | 'Intermediate' | 'Advanced';
+type LessonStatus = 'todo' | 'in_progress' | 'done';
+
+type LessonStats = {
+  total: number;
+  done: number;
+  in_progress: number;
+  todo: number;
+};
+
+/* ===== Reusable glass card (selaras dashboard) ===== */
+function GlassCard({
+  children, className = '',
+}: { children: React.ReactNode; className?: string }) {
+  return (
+    <div
+      className={[
+        'rounded-2xl backdrop-blur-xl',
+        'bg-white/80 dark:bg-slate-800/50',
+        'border border-white/20 dark:border-slate-700/50',
+        'shadow-lg', className,
+      ].join(' ')}
+    >
+      {children}
+    </div>
+  );
+}
+
 export default function EnhancedCoursesUI() {
+  const router = useRouter();
+  const { user } = useAuth();
+
   const [courses, setCourses] = useState<Course[]>([]);
+  const [lessons, setLessons] = useState<Lesson[]>([]);
   const [loading, setLoading] = useState(true);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [sortBy, setSortBy] = useState('recent');
-  const [viewMode, setViewMode] = useState('grid');
+  const [sortBy, setSortBy] = useState<'recent' | 'title' | 'progress'>('recent');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newCourse, setNewCourse] = useState({
     title: '',
     description: '',
     category: 'Frontend',
-    difficulty: 'Beginner' as 'Beginner' | 'Intermediate' | 'Advanced',
-    estimatedHours: 0
+    difficulty: 'Beginner' as Difficulty,
+    estimatedHours: 0,
   });
 
-  const { user } = useAuth();
+  // Edit modal states
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editCourseData, setEditCourseData] = useState<Course | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const categories = ['All', 'Frontend', 'Backend', 'Design', 'DevOps', 'Mobile'];
-  const difficulties = ['Beginner', 'Intermediate', 'Advanced'];
+  const difficulties: Difficulty[] = ['Beginner', 'Intermediate', 'Advanced'];
 
+  // Load + realtime subscribe
   useEffect(() => {
     if (!user) return;
 
-    const unsubscribe = CourseService.subscribeToCourses(user.uid, (updatedCourses) => {
+    setLoading(true);
+    const unsubCourses = CourseService.subscribeToCourses(user.uid, (updatedCourses) => {
       setCourses(updatedCourses);
       setLoading(false);
     });
+    const unsubLessons = LessonService.subscribeToLessons(user.uid, (updatedLessons) => {
+      setLessons(updatedLessons);
+    });
 
-    return () => unsubscribe();
+    return () => {
+      unsubCourses?.();
+      unsubLessons?.();
+    };
   }, [user]);
 
-  const filteredAndSortedCourses = React.useMemo(() => {
-  const filtered = courses.filter(course => {
-    const matchesSearch = course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         course.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = selectedCategory === 'All' || course.category === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+  // ---- Derivatives dari lessons ----
+  const lessonStatsByCourseId = useMemo(() => {
+    const map = new Map<string, LessonStats>();
+    for (const l of lessons) {
+      const cid = (l as any).courseId || '';
+      if (!cid) continue;
+      if (!map.has(cid)) {
+        map.set(cid, { total: 0, done: 0, in_progress: 0, todo: 0 });
+      }
+      const stats = map.get(cid)!;
+      stats.total += 1;
+      const s = (l.status as LessonStatus) || 'todo';
+      if (s === 'done') stats.done += 1;
+      else if (s === 'in_progress') stats.in_progress += 1;
+      else stats.todo += 1;
+    }
+    return map;
+  }, [lessons]);
+
+  const getDerivedLessonsCount = (courseId?: string) =>
+    (courseId && lessonStatsByCourseId.get(courseId)?.total) || 0;
+
+  const getDerivedProgress = (courseId?: string) => {
+    if (!courseId) return 0;
+    const stats = lessonStatsByCourseId.get(courseId);
+    if (!stats || stats.total === 0) return 0;
+    return Math.round((stats.done / stats.total) * 100);
+  };
+
+  // ---- Filtering & sorting ----
+  const filteredAndSortedCourses = useMemo(() => {
+    const filtered = courses.filter((course) => {
+      const matchesSearch =
+        course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        course.description.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesCategory = selectedCategory === 'All' || course.category === selectedCategory;
+      return matchesSearch && matchesCategory;
+    });
 
     return filtered.sort((a, b) => {
       switch (sortBy) {
         case 'title':
           return a.title.localeCompare(b.title);
         case 'progress':
-          return b.progress - a.progress;
+          return getDerivedProgress(b.id) - getDerivedProgress(a.id);
         case 'recent':
-          return new Date(b.lastAccessed).getTime() - new Date(a.lastAccessed).getTime();
         default:
-          return 0;
+          return new Date(b.lastAccessed || 0).getTime() - new Date(a.lastAccessed || 0).getTime();
       }
     });
-  }, [courses, searchQuery, selectedCategory, sortBy]);
+  }, [courses, searchQuery, selectedCategory, sortBy, lessonStatsByCourseId]);
 
+  // ---- KPI cards ----
+  const kpi = useMemo(() => {
+    const total = courses.length;
+    const completed = courses.filter((c) => getDerivedProgress(c.id) === 100).length;
+    const inProgress = courses.filter((c) => {
+      const p = getDerivedProgress(c.id);
+      return p > 0 && p < 100;
+    }).length;
+    const totalHours = courses.reduce((acc, c) => acc + (c.estimatedHours || 0), 0);
+    return { total, completed, inProgress, totalHours };
+  }, [courses, lessonStatsByCourseId]);
+
+  // Create
   const handleCreateCourse = async () => {
     if (!user || !newCourse.title.trim()) return;
-
     try {
       await CourseService.createCourse(newCourse, user.uid);
-      setNewCourse({ title: '', description: '', category: 'Frontend', difficulty: 'Beginner', estimatedHours: 0 });
+      setNewCourse({
+        title: '',
+        description: '',
+        category: 'Frontend',
+        difficulty: 'Beginner',
+        estimatedHours: 0,
+      });
       setShowCreateModal(false);
     } catch (error) {
       console.error('Error creating course:', error);
     }
   };
 
+  // Delete
   const handleDeleteCourse = async (courseId: string) => {
     if (!user) return;
-
     try {
       await CourseService.deleteCourse(courseId);
     } catch (error) {
@@ -81,413 +178,573 @@ export default function EnhancedCoursesUI() {
     }
   };
 
-  const getDifficultyColor = (difficulty: string): string => {
-    const colorMap = {
-      Beginner: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-      Intermediate: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-      Advanced: 'bg-red-500/20 text-red-400 border-red-500/30',
-    };
-    return colorMap[difficulty as keyof typeof colorMap] || 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+  // View
+  const handleViewCourse = (courseId: string) => {
+    if (!courseId) return;
+    router.push(`/courses/${courseId}`);
   };
 
-  const getCategoryColor = (category: string): string => {
-    const colors = {
-      Frontend: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-      Backend: 'bg-green-500/20 text-green-400 border-green-500/30',
-      Design: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-      DevOps: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-      Mobile: 'bg-pink-500/20 text-pink-400 border-pink-500/30'
-    };
-    return colors[category as keyof typeof colors] || 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+  // Edit open
+  const handleEditCourse = (course: Course) => {
+    setEditCourseData(course);
+    setShowEditModal(true);
   };
+
+  // Edit save (progress dihitung otomatis dari lessons)
+  const handleSaveEdit = async () => {
+    if (!editCourseData?.id) return;
+    setSavingEdit(true);
+    try {
+      const { title, description, category, difficulty, estimatedHours, featured } =
+        editCourseData;
+
+      await CourseService.updateCourse(editCourseData.id, {
+        title,
+        description,
+        category,
+        difficulty,
+        estimatedHours,
+        featured: !!featured,
+      });
+
+      setShowEditModal(false);
+    } catch (err) {
+      console.error('Error updating course:', err);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  /* ===== Theme-aware pill helpers ===== */
+  const diffPill = (difficulty: string): string => {
+    const map: Record<string, string> = {
+      Beginner:
+        'border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/30',
+      Intermediate:
+        'border bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30',
+      Advanced:
+        'border bg-red-50 text-red-700 border-red-200 dark:bg-red-500/20 dark:text-red-300 dark:border-red-500/30',
+    };
+    return map[difficulty] || 'border bg-gray-50 text-gray-700 border-gray-200 dark:bg-slate-500/20 dark:text-slate-300 dark:border-slate-500/30';
+  };
+
+  const catPill = (category: string): string => {
+    const map: Record<string, string> = {
+      Frontend:
+        'border bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-500/30',
+      Backend:
+        'border bg-green-50 text-green-700 border-green-200 dark:bg-green-500/20 dark:text-green-300 dark:border-green-500/30',
+      Design:
+        'border bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-500/20 dark:text-purple-300 dark:border-purple-500/30',
+      DevOps:
+        'border bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/20 dark:text-orange-300 dark:border-orange-500/30',
+      Mobile:
+        'border bg-pink-50 text-pink-700 border-pink-200 dark:bg-pink-500/20 dark:text-pink-300 dark:border-pink-500/30',
+    };
+    return map[category] || 'border bg-gray-50 text-gray-700 border-gray-200 dark:bg-slate-500/20 dark:text-slate-300 dark:border-slate-500/30';
+  };
+
+  const inputBase =
+    'px-4 py-3 rounded-xl border bg-white/80 dark:bg-slate-900/50 ' +
+    'border-gray-200 dark:border-slate-600 text-slate-900 dark:text-white ' +
+    'placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500';
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white flex items-center justify-center">
+      <div className="min-h-[100svh] md:min-h-dvh p-6 bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 flex items-center justify-center">
         <div className="text-center">
-          <BookOpen className="w-12 h-12 text-blue-400 mx-auto mb-4 animate-pulse" />
-          <p className="text-xl text-slate-300">Loading courses...</p>
+          <BookOpen className="w-12 h-12 text-blue-500 dark:text-blue-400 mx-auto mb-4 animate-pulse" />
+          <p className="text-xl text-slate-600 dark:text-slate-300">Loading courses...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
-      {/* Header */}
-      <div className="border-b border-slate-700/50 bg-slate-800/30 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                Learning Tracker
-              </h1>
-              <div className="hidden md:flex items-center space-x-2 text-slate-400">
-                <span>/</span>
-                <BookOpen className="w-4 h-4" />
-                <span>Courses</span>
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <span className="text-slate-300">Welcome, {user?.displayName || user?.email?.split('@')[0] || 'User'}</span>
-              <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-sm font-semibold">
-                {(user?.displayName || user?.email?.split('@')[0])?.charAt(0).toUpperCase() || 'U'}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+    <div
+      className="
+        min-h-[100svh] md:min-h-dvh w-full overflow-x-hidden
+        px-3 sm:px-4 md:px-6 py-4 sm:py-6
+        bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50
+        dark:from-slate-900 dark:via-slate-800 dark:to-slate-900
+        text-slate-900 dark:text-white
+      "
+    >
+      {/* NOTE: tidak ada header/breadcrumb lokal di sini agar tidak duplikat dengan AppHeader */}
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="mx-auto w-full max-w-screen-2xl 2xl:max-w-[1600px] space-y-8">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl p-6 border border-slate-700/50">
-            <div className="flex items-center justify-between">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
+          <GlassCard>
+            <div className="p-6 flex items-center justify-between">
               <div>
-                <p className="text-slate-400 text-sm">Total Courses</p>
-                <p className="text-2xl font-bold text-white">{courses.length}</p>
+                <p className="text-slate-500 dark:text-slate-400 text-sm">Total Courses</p>
+                <p className="text-2xl font-bold">{kpi.total}</p>
               </div>
-              <BookOpen className="w-8 h-8 text-blue-400" />
+              <BookOpen className="w-8 h-8 text-blue-600 dark:text-blue-400" />
             </div>
-          </div>
-          <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl p-6 border border-slate-700/50">
-            <div className="flex items-center justify-between">
+          </GlassCard>
+          <GlassCard>
+            <div className="p-6 flex items-center justify-between">
               <div>
-                <p className="text-slate-400 text-sm">Completed</p>
-                <p className="text-2xl font-bold text-white">{courses.filter(c => c.progress === 100).length}</p>
+                <p className="text-slate-500 dark:text-slate-400 text-sm">Completed</p>
+                <p className="text-2xl font-bold">{kpi.completed}</p>
               </div>
-              <Star className="w-8 h-8 text-green-400" />
+              <Star className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
             </div>
-          </div>
-          <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl p-6 border border-slate-700/50">
-            <div className="flex items-center justify-between">
+          </GlassCard>
+          <GlassCard>
+            <div className="p-6 flex items-center justify-between">
               <div>
-                <p className="text-slate-400 text-sm">In Progress</p>
-                <p className="text-2xl font-bold text-white">{courses.filter(c => c.progress > 0 && c.progress < 100).length}</p>
+                <p className="text-slate-500 dark:text-slate-400 text-sm">In Progress</p>
+                <p className="text-2xl font-bold">{kpi.inProgress}</p>
               </div>
-              <Clock className="w-8 h-8 text-purple-400" />
+              <Clock className="w-8 h-8 text-purple-600 dark:text-purple-400" />
             </div>
-          </div>
-          <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl p-6 border border-slate-700/50">
-            <div className="flex items-center justify-between">
+          </GlassCard>
+          <GlassCard>
+            <div className="p-6 flex items-center justify-between">
               <div>
-                <p className="text-slate-400 text-sm">Total Hours</p>
-                <p className="text-2xl font-bold text-white">{courses.reduce((acc, c) => acc + c.estimatedHours, 0)}</p>
+                <p className="text-slate-500 dark:text-slate-400 text-sm">Total Hours</p>
+                <p className="text-2xl font-bold">{kpi.totalHours}</p>
               </div>
-              <Calendar className="w-8 h-8 text-amber-400" />
+              <Calendar className="w-8 h-8 text-amber-600 dark:text-amber-400" />
             </div>
-          </div>
+          </GlassCard>
         </div>
 
         {/* Controls */}
-        <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl p-6 border border-slate-700/50 mb-8">
-          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
-            {/* Search and Filters */}
-            <div className="flex flex-col sm:flex-row gap-4 flex-1">
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search courses..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-slate-900/50 border border-slate-600 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                />
-              </div>
-              
-              <div className="flex gap-2">
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {categories.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
-                
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                  className="px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="recent">Recent</option>
-                  <option value="title">Title</option>
-                  <option value="progress">Progress</option>
-                </select>
-              </div>
-            </div>
+        <GlassCard>
+          <div className="p-6">
+            <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+              {/* Search & Filters */}
+              <div className="flex flex-col sm:flex-row gap-4 flex-1">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search courses..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className={`${inputBase} w-full pl-10 transition-all duration-200`}
+                  />
+                </div>
 
-            {/* Action Buttons */}
-            <div className="flex gap-3">
-              <button
-                onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-                className="px-4 py-3 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-xl transition-all duration-200 flex items-center gap-2"
-              >
-                <Filter className="w-4 h-4" />
-                {viewMode === 'grid' ? 'List' : 'Grid'}
-              </button>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 rounded-xl transition-all duration-200 flex items-center gap-2 font-semibold shadow-lg shadow-blue-500/25"
-              >
-                <Plus className="w-4 h-4" />
-                Create Course
-              </button>
+                <div className="flex gap-2">
+                  <select
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    className={inputBase}
+                  >
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                    className={inputBase}
+                  >
+                    <option value="recent">Recent</option>
+                    <option value="title">Title</option>
+                    <option value="progress">Progress</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+                  className="px-4 py-3 rounded-xl border bg-gray-100 hover:bg-gray-200 text-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-white dark:border-slate-600 transition-all duration-200 flex items-center gap-2"
+                >
+                  <Filter className="w-4 h-4" />
+                  {viewMode === 'grid' ? 'List' : 'Grid'}
+                </button>
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 rounded-xl transition-all duration-200 flex items-center gap-2 font-semibold text-white shadow-lg shadow-blue-500/20"
+                >
+                  <Plus className="w-4 h-4" />
+                  Create Course
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </GlassCard>
 
         {/* Courses Grid/List */}
         {viewMode === 'grid' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredAndSortedCourses.map((course) => (
-              <div
-                key={course.id}
-                className="group bg-slate-800/50 backdrop-blur-xl rounded-2xl p-6 border border-slate-700/50 hover:border-blue-500/50 hover:shadow-xl hover:shadow-blue-500/10 transition-all duration-300 hover:-translate-y-1"
-              >
-                {/* Course Header */}
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <h3 className="text-xl font-semibold text-white group-hover:text-blue-400 transition-colors">
-                        {course.title}
-                      </h3>
-                      {course.featured && (
-                        <Star className="w-4 h-4 text-amber-400 fill-current" />
-                      )}
+            {filteredAndSortedCourses.map((course) => {
+              const progress = getDerivedProgress(course.id);
+              const lessonsCount = getDerivedLessonsCount(course.id);
+
+              return (
+                <GlassCard key={course.id} className="hover:shadow-xl transition-all">
+                  <div className="p-6">
+                    {/* Header */}
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <h3 className="text-xl font-semibold">{course.title}</h3>
+                          {course.featured && <Star className="w-4 h-4 text-amber-500 dark:text-amber-400 fill-current" />}
+                        </div>
+                        <p className="text-slate-600 dark:text-slate-300 text-sm line-clamp-2">{course.description}</p>
+                      </div>
                     </div>
-                    <p className="text-slate-400 text-sm line-clamp-2">{course.description}</p>
-                  </div>
-                </div>
 
-                {/* Tags */}
-                <div className="flex gap-2 mb-4">
-                  <span className={`px-2 py-1 text-xs rounded-lg border ${getCategoryColor(course.category)}`}>
-                    {course.category}
-                  </span>
-                  <span className={`px-2 py-1 text-xs rounded-lg border ${getDifficultyColor(course.difficulty)}`}>
-                    {course.difficulty}
-                  </span>
-                </div>
+                    {/* Tags */}
+                    <div className="flex gap-2 mb-4">
+                      <span className={`px-2 py-1 text-xs rounded-lg ${catPill(course.category)}`}>
+                        {course.category}
+                      </span>
+                      <span className={`px-2 py-1 text-xs rounded-lg ${diffPill(course.difficulty)}`}>
+                        {course.difficulty}
+                      </span>
+                    </div>
 
-                {/* Progress */}
-                <div className="mb-4">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-sm text-slate-400">Progress</span>
-                    <span className="text-sm font-semibold text-white">{course.progress}%</span>
-                  </div>
-                  <div className="w-full bg-slate-700 rounded-full h-2">
-                    <div
-                      className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all duration-500"
-                      style={{ width: `${course.progress}%` }}
-                    />
-                  </div>
-                </div>
+                    {/* Progress */}
+                    <div className="mb-4">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-sm text-slate-600 dark:text-slate-400">Progress</span>
+                        <span className="text-sm font-semibold">{progress}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
+                        <div
+                          className="bg-gradient-to-r from-blue-600 to-purple-600 h-2 rounded-full transition-all duration-500"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                    </div>
 
-                {/* Stats */}
-                <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-                  <div className="text-slate-400">
-                    <BookOpen className="w-4 h-4 inline mr-1" />
-                    {course.lessonsCount} lessons
-                  </div>
-                  <div className="text-slate-400">
-                    <Clock className="w-4 h-4 inline mr-1" />
-                    {course.estimatedHours}h total
-                  </div>
-                </div>
+                    {/* Stats */}
+                    <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+                      <div className="text-slate-600 dark:text-slate-300">
+                        <BookOpen className="w-4 h-4 inline mr-1" />
+                        {lessonsCount} lessons
+                      </div>
+                      <div className="text-slate-600 dark:text-slate-300">
+                        <Clock className="w-4 h-4 inline mr-1" />
+                        {course.estimatedHours}h total
+                      </div>
+                    </div>
 
-                {/* Actions */}
-                <div className="flex gap-2">
-                  <button className="flex-1 px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors font-medium">
-                    <Eye className="w-4 h-4 inline mr-1" />
-                    View
-                  </button>
-                  <button className="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">
-                    <Edit3 className="w-4 h-4" />
-                  </button>
-                  <button 
-                    onClick={() => handleDeleteCourse(course.id!)}
-                    className="px-3 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
+                    {/* Actions */}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleViewCourse(course.id!)}
+                        className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                      >
+                        <Eye className="w-4 h-4 inline mr-1" />
+                        View
+                      </button>
+                      <button
+                        onClick={() => handleEditCourse(course)}
+                        className="px-3 py-2 rounded-lg border bg-gray-100 hover:bg-gray-200 text-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-white dark:border-slate-600 transition-colors"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteCourse(course.id!)}
+                        className="px-3 py-2 rounded-lg border bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-500/20 dark:hover:bg-red-500/30 dark:text-red-300 dark:border-red-500/30 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </GlassCard>
+              );
+            })}
           </div>
         ) : (
-          <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl border border-slate-700/50 overflow-hidden">
-            <div className="overflow-x-auto">
+          <GlassCard>
+            <div className="overflow-x-auto rounded-2xl">
               <table className="w-full">
-                <thead className="bg-slate-900/50 border-b border-slate-700">
+                <thead className="bg-gray-50 dark:bg-slate-900/40 border-b border-gray-200 dark:border-slate-700">
                   <tr>
-                    <th className="text-left p-6 text-slate-300 font-semibold">Course</th>
-                    <th className="text-left p-6 text-slate-300 font-semibold">Category</th>
-                    <th className="text-left p-6 text-slate-300 font-semibold">Progress</th>
-                    <th className="text-left p-6 text-slate-300 font-semibold">Lessons</th>
-                    <th className="text-center p-6 text-slate-300 font-semibold">Actions</th>
+                    <th className="text-left p-6 text-slate-700 dark:text-slate-300 font-semibold">Course</th>
+                    <th className="text-left p-6 text-slate-700 dark:text-slate-300 font-semibold">Category</th>
+                    <th className="text-left p-6 text-slate-700 dark:text-slate-300 font-semibold">Progress</th>
+                    <th className="text-left p-6 text-slate-700 dark:text-slate-300 font-semibold">Lessons</th>
+                    <th className="text-center p-6 text-slate-700 dark:text-slate-300 font-semibold">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredAndSortedCourses.map((course) => (
-                    <tr key={course.id} className="border-b border-slate-700/50 hover:bg-slate-700/25 transition-colors">
-                      <td className="p-6">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-semibold text-white">{course.title}</h3>
-                            {course.featured && <Star className="w-4 h-4 text-amber-400 fill-current" />}
+                  {filteredAndSortedCourses.map((course) => {
+                    const p = getDerivedProgress(course.id);
+                    const lessonsCount = getDerivedLessonsCount(course.id);
+                    return (
+                      <tr key={course.id} className="border-b border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800/40 transition-colors">
+                        <td className="p-6">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-semibold">{course.title}</h3>
+                              {course.featured && <Star className="w-4 h-4 text-amber-500 dark:text-amber-400 fill-current" />}
+                            </div>
+                            <p className="text-slate-600 dark:text-slate-300 text-sm mt-1">{course.description}</p>
                           </div>
-                          <p className="text-slate-400 text-sm mt-1">{course.description}</p>
-                        </div>
-                      </td>
-                      <td className="p-6">
-                        <div className="flex gap-2">
-                          <span className={`px-2 py-1 text-xs rounded-lg border ${getCategoryColor(course.category)}`}>
-                            {course.category}
-                          </span>
-                          <span className={`px-2 py-1 text-xs rounded-lg border ${getDifficultyColor(course.difficulty)}`}>
-                            {course.difficulty}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="p-6">
-                        <div className="flex items-center gap-3">
-                          <div className="w-20 bg-slate-700 rounded-full h-2">
-                            <div
-                              className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full"
-                              style={{ width: `${course.progress}%` }}
-                            />
+                        </td>
+                        <td className="p-6">
+                          <div className="flex gap-2">
+                            <span className={`px-2 py-1 text-xs rounded-lg ${catPill(course.category)}`}>
+                              {course.category}
+                            </span>
+                            <span className={`px-2 py-1 text-xs rounded-lg ${diffPill(course.difficulty)}`}>
+                              {course.difficulty}
+                            </span>
                           </div>
-                          <span className="text-sm font-semibold text-white">{course.progress}%</span>
-                        </div>
-                      </td>
-                      <td className="p-6 text-slate-300">{course.lessonsCount}</td>
-                      <td className="p-6">
-                        <div className="flex justify-center gap-2">
-                          <button className="px-3 py-1 bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors text-sm">
-                            View
-                          </button>
-                          <button className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={() => handleDeleteCourse(course.id!)}
-                            className="px-3 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="p-6">
+                          <div className="flex items-center gap-3">
+                            <div className="w-20 bg-gray-200 dark:bg-slate-700 rounded-full h-2">
+                              <div
+                                className="bg-gradient-to-r from-blue-600 to-purple-600 h-2 rounded-full"
+                                style={{ width: `${p}%` }}
+                              />
+                            </div>
+                            <span className="text-sm font-semibold">{p}%</span>
+                          </div>
+                        </td>
+                        <td className="p-6">{lessonsCount}</td>
+                        <td className="p-6">
+                          <div className="flex justify-center gap-2">
+                            <button
+                              onClick={() => handleViewCourse(course.id!)}
+                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm"
+                            >
+                              View
+                            </button>
+                            <button
+                              onClick={() => handleEditCourse(course)}
+                              className="px-3 py-1 rounded-lg border bg-gray-100 hover:bg-gray-200 text-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-white dark:border-slate-600 transition-colors"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCourse(course.id!)}
+                              className="px-3 py-1 rounded-lg border bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-500/20 dark:hover:bg-red-500/30 dark:text-red-300 dark:border-red-500/30 transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
-          </div>
+          </GlassCard>
         )}
 
         {filteredAndSortedCourses.length === 0 && (
-          <div className="text-center py-12">
-            <BookOpen className="w-16 h-16 text-slate-600 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-slate-300 mb-2">No courses found</h3>
-            <p className="text-slate-400 mb-4">
-              {searchQuery || selectedCategory !== 'All' 
-                ? 'Try adjusting your search or filters' 
-                : 'Get started by creating your first course'}
-            </p>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 rounded-xl transition-all duration-200 font-semibold"
-            >
-              Create Your First Course
-            </button>
-          </div>
+          <GlassCard>
+            <div className="text-center py-12">
+              <BookOpen className="w-16 h-16 text-slate-400 dark:text-slate-500 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold mb-2">No courses found</h3>
+              <p className="text-slate-600 dark:text-slate-400 mb-4">
+                {searchQuery || selectedCategory !== 'All'
+                  ? 'Try adjusting your search or filters'
+                  : 'Get started by creating your first course'}
+              </p>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 rounded-xl transition-all duration-200 font-semibold text-white"
+              >
+                Create Your First Course
+              </button>
+            </div>
+          </GlassCard>
         )}
       </div>
 
       {/* Create Course Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-md">
-            <div className="p-6 border-b border-slate-700">
-              <h2 className="text-xl font-semibold text-white">Create New Course</h2>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Title</label>
-                <input
-                  type="text"
-                  value={newCourse.title}
-                  onChange={(e) => setNewCourse(prev => ({ ...prev, title: e.target.value }))}
-                  className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter course title..."
-                />
+          <div className="w-full max-w-md">
+            <GlassCard>
+              <div className="p-6 border-b border-white/20 dark:border-slate-700/50">
+                <h2 className="text-xl font-semibold">Create New Course</h2>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Description</label>
-                <textarea
-                  value={newCourse.description}
-                  onChange={(e) => setNewCourse(prev => ({ ...prev, description: e.target.value }))}
-                  rows={3}
-                  className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                  placeholder="Enter course description..."
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="p-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Category</label>
-                  <select
-                    value={newCourse.category}
-                    onChange={(e) => setNewCourse(prev => ({ ...prev, category: e.target.value }))}
-                    className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {categories.slice(1).map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
+                  <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Title</label>
+                  <input
+                    type="text"
+                    value={newCourse.title}
+                    onChange={(e) => setNewCourse((prev) => ({ ...prev, title: e.target.value }))}
+                    className={`${inputBase} w-full`}
+                    placeholder="Enter course title..."
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Difficulty</label>
-                  <select
-                    value={newCourse.difficulty}
-                    onChange={(e) => setNewCourse(prev => ({ ...prev, difficulty: e.target.value as 'Beginner' | 'Intermediate' | 'Advanced' }))}
-                    className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {difficulties.map(diff => (
-                      <option key={diff} value={diff}>{diff}</option>
-                    ))}
-                  </select>
+                  <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Description</label>
+                  <textarea
+                    value={newCourse.description}
+                    onChange={(e) => setNewCourse((prev) => ({ ...prev, description: e.target.value }))}
+                    rows={3}
+                    className={`${inputBase} w-full resize-none`}
+                    placeholder="Enter course description..."
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Category</label>
+                    <select
+                      value={newCourse.category}
+                      onChange={(e) => setNewCourse((prev) => ({ ...prev, category: e.target.value }))}
+                      className={inputBase}
+                    >
+                      {categories.slice(1).map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Difficulty</label>
+                    <select
+                      value={newCourse.difficulty}
+                      onChange={(e) =>
+                        setNewCourse((prev) => ({ ...prev, difficulty: e.target.value as Difficulty }))
+                      }
+                      className={inputBase}
+                    >
+                      {difficulties.map((diff) => (
+                        <option key={diff} value={diff}>
+                          {diff}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Estimated Hours</label>
+                  <input
+                    type="number"
+                    value={newCourse.estimatedHours}
+                    onChange={(e) =>
+                      setNewCourse((prev) => ({ ...prev, estimatedHours: parseInt(e.target.value) || 0 }))
+                    }
+                    className={inputBase}
+                    placeholder="0"
+                    min={0}
+                  />
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Estimated Hours</label>
-                <input
-                  type="number"
-                  value={newCourse.estimatedHours}
-                  onChange={(e) => setNewCourse(prev => ({ ...prev, estimatedHours: parseInt(e.target.value) || 0 }))}
-                  className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="0"
-                  min="0"
-                />
+              <div className="p-6 border-t border-white/20 dark:border-slate-700/50 flex gap-3">
+                <button
+                  onClick={() => setShowCreateModal(false)}
+                  className="flex-1 px-4 py-3 rounded-xl border bg-gray-100 hover:bg-gray-200 text-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-white dark:border-slate-600 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateCourse}
+                  disabled={!newCourse.title.trim()}
+                  className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-xl transition-all duration-200 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Create Course
+                </button>
               </div>
-            </div>
-            <div className="p-6 border-t border-slate-700 flex gap-3">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="flex-1 px-4 py-3 bg-slate-700 hover:bg-slate-600 rounded-xl transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateCourse}
-                disabled={!newCourse.title.trim()}
-                className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all duration-200 font-semibold"
-              >
-                Create Course
-              </button>
-            </div>
+            </GlassCard>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Course Modal */}
+      {showEditModal && editCourseData && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md">
+            <GlassCard>
+              <div className="p-6 border-b border-white/20 dark:border-slate-700/50">
+                <h2 className="text-xl font-semibold">Edit Course</h2>
+              </div>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Title</label>
+                  <input
+                    type="text"
+                    value={editCourseData.title}
+                    onChange={(e) => setEditCourseData({ ...editCourseData, title: e.target.value })}
+                    className={inputBase}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Description</label>
+                  <textarea
+                    value={editCourseData.description}
+                    onChange={(e) => setEditCourseData({ ...editCourseData, description: e.target.value })}
+                    rows={3}
+                    className={`${inputBase} resize-none`}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Category</label>
+                    <select
+                      value={editCourseData.category}
+                      onChange={(e) => setEditCourseData({ ...editCourseData, category: e.target.value })}
+                      className={inputBase}
+                    >
+                      {categories.slice(1).map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Difficulty</label>
+                    <select
+                      value={editCourseData.difficulty as Difficulty}
+                      onChange={(e) => setEditCourseData({ ...editCourseData, difficulty: e.target.value as Difficulty })}
+                      className={inputBase}
+                    >
+                      {difficulties.map((diff) => (
+                        <option key={diff} value={diff}>
+                          {diff}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Estimated Hours</label>
+                  <input
+                    type="number"
+                    value={editCourseData.estimatedHours || 0}
+                    onChange={(e) => setEditCourseData({ ...editCourseData, estimatedHours: parseInt(e.target.value) || 0 })}
+                    className={inputBase}
+                    min={0}
+                  />
+                </div>
+                <div className="text-xs text-slate-600 dark:text-slate-400">
+                  Progress is calculated automatically from completed lessons.
+                </div>
+              </div>
+              <div className="p-6 border-t border-white/20 dark:border-slate-700/50 flex gap-3">
+                <button
+                  onClick={() => setShowEditModal(false)}
+                  className="flex-1 px-4 py-3 rounded-xl border bg-gray-100 hover:bg-gray-200 text-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-white dark:border-slate-600 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={savingEdit}
+                  className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-xl transition-all duration-200 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {savingEdit ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </GlassCard>
           </div>
         </div>
       )}

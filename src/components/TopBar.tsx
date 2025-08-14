@@ -1,6 +1,6 @@
 'use client';
 import { useAuth } from '@/components/AuthProvider';
-import { ThemeToggle } from '@/components/ThemeToggle';
+import ThemeToggle from '@/components/ThemeToggle';
 
 export function TopBar() {
   const { user, logout } = useAuth();

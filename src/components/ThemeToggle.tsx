@@ -1,41 +1,33 @@
 'use client';
-import { useThemeStore } from '@/store/theme';
-import { Sun, Moon } from 'lucide-react';
-import { useEffect, useState } from 'react';
 
-export function ThemeToggle() {
+import { useEffect, useState } from 'react';
+import { useTheme } from 'next-themes';
+
+export default function ThemeToggle({
+  icons,
+}: { icons?: { light?: React.ReactNode; dark?: React.ReactNode } }) {
+  const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
-  const { theme, toggle } = useThemeStore();
-  
-  // Ensure component is mounted before rendering theme-dependent content
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  useEffect(() => setMounted(true), []);
 
   if (!mounted) {
-    // Render a placeholder during SSR to prevent hydration mismatch
     return (
       <button
-        className="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 transition-colors"
+        className="rounded-lg px-3 py-2 text-sm bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-white/10 text-slate-700 dark:text-slate-200"
         aria-label="Toggle theme"
-        disabled
-      >
-        <div className="w-5 h-5" />
-      </button>
+      >…</button>
     );
   }
-  
+
+  const isDark = resolvedTheme === 'dark';
   return (
     <button
-      onClick={toggle}
-      className="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+      onClick={() => setTheme(isDark ? 'light' : 'dark')}
+      className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm bg-gray-100/80 dark:bg-slate-800/60 border border-gray-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
       aria-label="Toggle theme"
+      title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
     >
-      {theme === 'dark' ? (
-        <Sun className="w-5 h-5 text-yellow-500" />
-      ) : (
-        <Moon className="w-5 h-5 text-gray-700" />
-      )}
+      {isDark ? (icons?.light ?? 'Light') : (icons?.dark ?? 'Dark')}
     </button>
   );
 }
