@@ -1,3 +1,4 @@
+// src/app/lessons/page.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -7,6 +8,8 @@ import { CourseService, Course } from '@/lib/firebase/courses';
 import {
   Plus, Search, Trash2, Clock, Edit3, BookOpen, CheckCircle2, PlayCircle, Circle, Filter,
 } from 'lucide-react';
+
+/* ========= Types ========= */
 
 type LessonStatus = 'todo' | 'in_progress' | 'done';
 type LessonPriority = 'low' | 'medium' | 'high';
@@ -20,10 +23,44 @@ interface LessonForm {
   priority: LessonPriority;
   type: LessonType;
   estimatedTime: number;
-  dueDate: string; // YYYY-MM-DD
+  /** YYYY-MM-DD */
+  dueDate: string;
 }
 
-/* ===== Reusable glass card (selaras dashboard) ===== */
+type FireDate = Date | { toDate?: () => Date } | string | number | null | undefined;
+
+type LessonExtra = {
+  courseId?: string;
+  priority?: LessonPriority;
+  type?: LessonType;
+  estimatedTime?: number;
+  dueDate?: FireDate;
+  updatedAt?: FireDate;
+  createdAt?: FireDate;
+};
+
+/* ========= Utils (tanpa any) ========= */
+
+function asDate(value: FireDate): Date | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) return value;
+  if (typeof value === 'string') return new Date(value);
+  if (typeof value === 'number') return new Date(value);
+  if (typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+    const d = value.toDate();
+    return d instanceof Date ? d : undefined;
+  }
+  return undefined;
+}
+function asMillis(value: FireDate): number {
+  const d = asDate(value);
+  return d ? d.getTime() : 0;
+}
+function lessonEx(l: Lesson): LessonExtra {
+  return l as unknown as LessonExtra;
+}
+
+/* ===== Reusable glass card ===== */
 function GlassCard({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
     <div
@@ -39,7 +76,7 @@ function GlassCard({ children, className = '' }: { children: React.ReactNode; cl
   );
 }
 
-export default function LessonsPage() {
+export default function LessonsPage(): React.ReactElement {
   const { user } = useAuth();
 
   const [lessons, setLessons] = useState<Lesson[]>([]);
@@ -64,9 +101,10 @@ export default function LessonsPage() {
     dueDate: new Date().toISOString().split('T')[0],
   });
 
-  // edit modal
+  // edit modal (gunakan form state khusus, tidak mengubah object Lesson langsung)
+  type EditForm = LessonForm & { id: string };
   const [showEditModal, setShowEditModal] = useState(false);
-  const [editLesson, setEditLesson] = useState<Lesson | null>(null);
+  const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
@@ -98,17 +136,23 @@ export default function LessonsPage() {
 
   /* ===== Derived ===== */
   const filteredLessons = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     return lessons
       .filter((l) => {
-        const q = searchQuery.trim().toLowerCase();
-        const matchQ = !q || l.title.toLowerCase().includes(q) || l.description.toLowerCase().includes(q);
-        const matchCourse = filterCourse === 'All' || l.courseId === filterCourse;
+        const ex = lessonEx(l);
+        const matchQ =
+          !q ||
+          l.title.toLowerCase().includes(q) ||
+          l.description.toLowerCase().includes(q);
+        const matchCourse = filterCourse === 'All' || ex.courseId === filterCourse;
         const matchStatus = filterStatus === 'All' || l.status === filterStatus;
         return matchQ && matchCourse && matchStatus;
       })
       .sort((a, b) => {
-        const da = (a as any).updatedAt?.toMillis?.() ?? (a as any).createdAt?.toMillis?.() ?? 0;
-        const db = (b as any).updatedAt?.toMillis?.() ?? (b as any).createdAt?.toMillis?.() ?? 0;
+        const exA = lessonEx(a);
+        const exB = lessonEx(b);
+        const da = asMillis(exA.updatedAt) || asMillis(exA.createdAt);
+        const db = asMillis(exB.updatedAt) || asMillis(exB.createdAt);
         return db - da;
       });
   }, [lessons, searchQuery, filterCourse, filterStatus]);
@@ -122,10 +166,22 @@ export default function LessonsPage() {
   /* ===== Mutations ===== */
   const handleCreateLesson = async () => {
     if (!user || !newLesson.title.trim() || !newLesson.courseId) return;
+
+    const createPayload: unknown = {
+      title: newLesson.title,
+      description: newLesson.description,
+      courseId: newLesson.courseId,
+      status: newLesson.status,
+      priority: newLesson.priority,
+      type: newLesson.type,
+      estimatedTime: newLesson.estimatedTime,
+      dueDate: new Date(newLesson.dueDate),
+    };
+
     try {
       await LessonService.createLesson(
-        { ...newLesson, dueDate: new Date(newLesson.dueDate) } as any,
-        user.uid
+        createPayload as Parameters<typeof LessonService.createLesson>[0],
+        user.uid,
       );
       setShowCreateModal(false);
       setNewLesson({
@@ -154,37 +210,54 @@ export default function LessonsPage() {
 
   const handleChangeStatus = async (lessonId: string, status: LessonStatus) => {
     try {
-      await LessonService.updateLesson(lessonId, { status });
+      const updatePayload: unknown = { status };
+      await LessonService.updateLesson(
+        lessonId,
+        updatePayload as Parameters<typeof LessonService.updateLesson>[1],
+      );
     } catch (e) {
       console.error('Error updating status:', e);
     }
   };
 
   const openEdit = (l: Lesson) => {
-    setEditLesson(l);
+    const ex = lessonEx(l);
+    const due = asDate(ex.dueDate) ?? new Date();
+    const form: EditForm = {
+      id: l.id ?? '',
+      title: l.title,
+      description: l.description,
+      courseId: ex.courseId ?? '',
+      status: (l.status as LessonStatus) ?? 'todo',
+      priority: ex.priority ?? 'medium',
+      type: ex.type ?? 'reading',
+      estimatedTime: ex.estimatedTime ?? 30,
+      dueDate: due.toISOString().split('T')[0],
+    };
+    setEditForm(form);
     setShowEditModal(true);
   };
 
   const handleSaveEdit = async () => {
-    if (!editLesson?.id) return;
+    if (!editForm) return;
     setSavingEdit(true);
     try {
-      const payload: Partial<Lesson> = {
-        title: editLesson.title,
-        description: editLesson.description,
-        courseId: (editLesson as any).courseId,
-        status: editLesson.status,
-        priority: (editLesson as any).priority ?? 'medium',
-        type: (editLesson as any).type ?? 'reading',
-        estimatedTime: (editLesson as any).estimatedTime ?? 30,
-        dueDate: new Date(
-          ((editLesson as any).dueDateString as string) ||
-          (editLesson as any).dueDate?.toDate?.()?.toISOString()?.split('T')[0] ||
-          new Date().toISOString().split('T')[0]
-        ) as any,
+      const payload: unknown = {
+        title: editForm.title,
+        description: editForm.description,
+        courseId: editForm.courseId,
+        status: editForm.status,
+        priority: editForm.priority,
+        type: editForm.type,
+        estimatedTime: editForm.estimatedTime,
+        dueDate: new Date(editForm.dueDate),
       };
-      await LessonService.updateLesson(editLesson.id, payload as any);
+      await LessonService.updateLesson(
+        editForm.id,
+        payload as Parameters<typeof LessonService.updateLesson>[1],
+      );
       setShowEditModal(false);
+      setEditForm(null);
     } catch (e) {
       console.error('Error saving edit:', e);
     } finally {
@@ -220,7 +293,7 @@ export default function LessonsPage() {
     'bg-white/80 dark:bg-slate-900/50 border-gray-200 dark:border-slate-600 ' +
     'text-slate-900 dark:text-white placeholder-slate-400';
 
-  /* ===== Loading (full-bleed & theme-aware) ===== */
+  /* ===== Loading ===== */
   if (loading) {
     return (
       <div className="min-h-[100svh] md:min-h-dvh w-full grid place-items-center px-6
@@ -231,7 +304,7 @@ export default function LessonsPage() {
     );
   }
 
-  /* ===== Render (full-bleed, responsive) ===== */
+  /* ===== Render ===== */
   return (
     <div
       className="
@@ -242,9 +315,8 @@ export default function LessonsPage() {
         text-slate-900 dark:text-white
       "
     >
-      {/* max width like dashboard; remove local breadcrumb/title */}
       <div className="mx-auto w-full max-w-screen-2xl 2xl:max-w-[1600px] space-y-6">
-        {/* Controls (with Add button on the right) */}
+        {/* Controls */}
         <GlassCard>
           <div className="p-4">
             <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
@@ -263,7 +335,7 @@ export default function LessonsPage() {
                 <div className="flex gap-2">
                   <select
                     value={filterCourse}
-                    onChange={(e) => setFilterCourse(e.target.value as any)}
+                    onChange={(e) => setFilterCourse(e.target.value)}
                     className={inputBase}
                   >
                     <option value="All">All Courses</option>
@@ -276,7 +348,7 @@ export default function LessonsPage() {
 
                   <select
                     value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value as any)}
+                    onChange={(e) => setFilterStatus(e.target.value as 'All' | LessonStatus)}
                     className={inputBase}
                   >
                     <option value="All">All Status</option>
@@ -305,16 +377,13 @@ export default function LessonsPage() {
 
         {/* Lessons Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredLessons.map((lesson) => {
-            const c = courseMap.get(lesson.courseId || '');
-            const due =
-              (lesson as any).dueDate?.toDate?.() ??
-              (typeof (lesson as any).dueDate === 'string'
-                ? new Date((lesson as any).dueDate)
-                : undefined);
+          {filteredLessons.map((lesson, idx) => {
+            const ex = lessonEx(lesson);
+            const c = courseMap.get(ex.courseId ?? '');
+            const due = asDate(ex.dueDate);
 
             return (
-              <GlassCard key={lesson.id}>
+              <GlassCard key={lesson.id ?? `lesson-${idx}`}>
                 <div className="p-5">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
@@ -324,10 +393,10 @@ export default function LessonsPage() {
                         </h3>
                         <span
                           className={`px-2 py-0.5 rounded-md text-[11px] ${priorityBadge(
-                            (lesson as any).priority || 'medium'
+                            ex.priority ?? 'medium'
                           )}`}
                         >
-                          {(lesson as any).priority || 'medium'}
+                          {ex.priority ?? 'medium'}
                         </span>
                       </div>
                       <p className="text-slate-600 dark:text-slate-300 text-sm mt-1 line-clamp-2">
@@ -343,9 +412,10 @@ export default function LessonsPage() {
                         <Edit3 className="w-4 h-4 text-slate-700 dark:text-slate-300" />
                       </button>
                       <button
-                        onClick={() => handleDeleteLesson(lesson.id!)}
+                        onClick={() => lesson.id && handleDeleteLesson(lesson.id)}
                         className="p-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700/60"
                         title="Delete lesson"
+                        disabled={!lesson.id}
                       >
                         <Trash2 className="w-4 h-4 text-red-500" />
                       </button>
@@ -361,7 +431,7 @@ export default function LessonsPage() {
 
                   <div className="flex items-center gap-3 text-xs text-slate-600 dark:text-slate-400 mb-3">
                     <Clock className="w-3.5 h-3.5" />
-                    <span>{(lesson as any).estimatedTime || 30}m</span>
+                    <span>{ex.estimatedTime ?? 30}m</span>
                     {due && (
                       <>
                         <span>•</span>
@@ -378,7 +448,7 @@ export default function LessonsPage() {
                   <div className="flex items-center justify-between">
                     <span
                       className={`px-2 py-1 rounded-md text-[11px] ${statusBadge(
-                        lesson.status
+                        lesson.status as LessonStatus
                       )}`}
                     >
                       {lesson.status === 'in_progress'
@@ -390,23 +460,26 @@ export default function LessonsPage() {
 
                     <div className="flex items-center gap-1">
                       <button
-                        onClick={() => handleChangeStatus(lesson.id!, 'todo')}
+                        onClick={() => lesson.id && handleChangeStatus(lesson.id, 'todo')}
                         className="px-2.5 py-1 rounded-md bg-gray-100 hover:bg-gray-200 dark:bg-slate-700/40 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] flex items-center gap-1"
                         title="Mark To Do"
+                        disabled={!lesson.id}
                       >
                         <Circle className="w-3 h-3" /> To Do
                       </button>
                       <button
-                        onClick={() => handleChangeStatus(lesson.id!, 'in_progress')}
+                        onClick={() => lesson.id && handleChangeStatus(lesson.id, 'in_progress')}
                         className="px-2.5 py-1 rounded-md bg-gray-100 hover:bg-gray-200 dark:bg-slate-700/40 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] flex items-center gap-1"
                         title="Mark In Progress"
+                        disabled={!lesson.id}
                       >
                         <PlayCircle className="w-3 h-3" /> In Progress
                       </button>
                       <button
-                        onClick={() => handleChangeStatus(lesson.id!, 'done')}
+                        onClick={() => lesson.id && handleChangeStatus(lesson.id, 'done')}
                         className="px-2.5 py-1 rounded-md bg-gray-100 hover:bg-gray-200 dark:bg-slate-700/40 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] flex items-center gap-1"
                         title="Mark Done"
+                        disabled={!lesson.id}
                       >
                         <CheckCircle2 className="w-3 h-3" /> Done
                       </button>
@@ -548,7 +621,9 @@ export default function LessonsPage() {
                       type="number"
                       min={1}
                       value={newLesson.estimatedTime}
-                      onChange={(e) => setNewLesson({ ...newLesson, estimatedTime: parseInt(e.target.value) || 1 })}
+                      onChange={(e) =>
+                        setNewLesson({ ...newLesson, estimatedTime: Number.isFinite(parseInt(e.target.value, 10)) ? parseInt(e.target.value, 10) : 1 })
+                      }
                       className={inputBase}
                     />
                   </div>
@@ -588,7 +663,7 @@ export default function LessonsPage() {
       )}
 
       {/* Edit Modal */}
-      {showEditModal && editLesson && (
+      {showEditModal && editForm && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="w-full max-w-lg">
             <GlassCard>
@@ -602,8 +677,8 @@ export default function LessonsPage() {
                   </label>
                   <input
                     type="text"
-                    value={editLesson.title}
-                    onChange={(e) => setEditLesson({ ...editLesson, title: e.target.value })}
+                    value={editForm.title}
+                    onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
                     className={inputBase}
                   />
                 </div>
@@ -612,8 +687,8 @@ export default function LessonsPage() {
                     Description
                   </label>
                   <textarea
-                    value={editLesson.description}
-                    onChange={(e) => setEditLesson({ ...editLesson, description: e.target.value })}
+                    value={editForm.description}
+                    onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                     rows={3}
                     className={`${inputBase} resize-none`}
                   />
@@ -625,8 +700,8 @@ export default function LessonsPage() {
                       Course
                     </label>
                     <select
-                      value={(editLesson as any).courseId || ''}
-                      onChange={(e) => setEditLesson({ ...(editLesson as any), courseId: e.target.value })}
+                      value={editForm.courseId}
+                      onChange={(e) => setEditForm({ ...editForm, courseId: e.target.value })}
                       className={inputBase}
                     >
                       {courses.map((c) => (
@@ -641,8 +716,8 @@ export default function LessonsPage() {
                       Status
                     </label>
                     <select
-                      value={editLesson.status}
-                      onChange={(e) => setEditLesson({ ...editLesson, status: e.target.value as LessonStatus })}
+                      value={editForm.status}
+                      onChange={(e) => setEditForm({ ...editForm, status: e.target.value as LessonStatus })}
                       className={inputBase}
                     >
                       <option value="todo">To Do</option>
@@ -658,8 +733,8 @@ export default function LessonsPage() {
                       Priority
                     </label>
                     <select
-                      value={(editLesson as any).priority || 'medium'}
-                      onChange={(e) => setEditLesson({ ...(editLesson as any), priority: e.target.value as LessonPriority })}
+                      value={editForm.priority}
+                      onChange={(e) => setEditForm({ ...editForm, priority: e.target.value as LessonPriority })}
                       className={inputBase}
                     >
                       <option value="low">Low</option>
@@ -672,8 +747,8 @@ export default function LessonsPage() {
                       Type
                     </label>
                     <select
-                      value={(editLesson as any).type || 'reading'}
-                      onChange={(e) => setEditLesson({ ...(editLesson as any), type: e.target.value as LessonType })}
+                      value={editForm.type}
+                      onChange={(e) => setEditForm({ ...editForm, type: e.target.value as LessonType })}
                       className={inputBase}
                     >
                       <option value="reading">Reading</option>
@@ -689,8 +764,13 @@ export default function LessonsPage() {
                     <input
                       type="number"
                       min={1}
-                      value={(editLesson as any).estimatedTime || 30}
-                      onChange={(e) => setEditLesson({ ...(editLesson as any), estimatedTime: parseInt(e.target.value) || 1 })}
+                      value={editForm.estimatedTime}
+                      onChange={(e) =>
+                        setEditForm({
+                          ...editForm,
+                          estimatedTime: Number.isFinite(parseInt(e.target.value, 10)) ? parseInt(e.target.value, 10) : 1,
+                        })
+                      }
                       className={inputBase}
                     />
                   </div>
@@ -702,12 +782,8 @@ export default function LessonsPage() {
                   </label>
                   <input
                     type="date"
-                    value={
-                      (editLesson as any).dueDate?.toDate?.()?.toISOString()?.split('T')[0] ??
-                      ((editLesson as any).dueDateString as string) ??
-                      new Date().toISOString().split('T')[0]
-                    }
-                    onChange={(e) => setEditLesson({ ...(editLesson as any), dueDateString: e.target.value } as any)}
+                    value={editForm.dueDate}
+                    onChange={(e) => setEditForm({ ...editForm, dueDate: e.target.value })}
                     className={inputBase}
                   />
                 </div>
@@ -715,7 +791,7 @@ export default function LessonsPage() {
 
               <div className="p-6 border-t border-white/20 dark:border-slate-700/50 flex gap-3">
                 <button
-                  onClick={() => setShowEditModal(false)}
+                  onClick={() => { setShowEditModal(false); setEditForm(null); }}
                   className="flex-1 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-slate-900 rounded-xl dark:bg-slate-600 dark:hover:bg-slate-700 dark:text-white"
                 >
                   Cancel

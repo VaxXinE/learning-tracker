@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { TaskInput } from '@/lib/firebase/tasks';
+import type { TaskInput as TaskInputModel } from '@/lib/firebase/tasks';
 import { TaskService } from '@/lib/firebase/tasks';
 
 interface AddTaskFormProps {
@@ -10,7 +10,7 @@ interface AddTaskFormProps {
 }
 
 export default function AddTaskForm({ userId, onDone }: AddTaskFormProps) {
-  const [form, setForm] = useState<TaskInput>({
+  const [form, setForm] = useState<TaskInputModel>({
     title: '',
     description: '',
     dueDate: new Date(),
@@ -18,21 +18,21 @@ export default function AddTaskForm({ userId, onDone }: AddTaskFormProps) {
     estimatedTime: 60,
     tags: [],
   });
-  const [tagsText, setTagsText] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [tagsText, setTagsText] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!form.title.trim()) return;
+    if (!form.title.trim() || loading) return;
 
     setLoading(true);
     try {
-      const input: TaskInput = {
+      const input: TaskInputModel = {
         ...form,
         tags: tagsText
           .split(',')
-          .map(t => t.trim())
-          .filter(Boolean),
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0),
       };
       await TaskService.createTask(input, userId);
 
@@ -54,6 +54,10 @@ export default function AddTaskForm({ userId, onDone }: AddTaskFormProps) {
     }
   };
 
+  const dateValue = form.dueDate instanceof Date
+    ? form.dueDate.toISOString().split('T')[0]
+    : new Date().toISOString().split('T')[0];
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
@@ -61,9 +65,10 @@ export default function AddTaskForm({ userId, onDone }: AddTaskFormProps) {
         <input
           className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
           value={form.title}
-          onChange={(e) => setForm(v => ({ ...v, title: e.target.value }))}
+          onChange={(e) => setForm((v) => ({ ...v, title: e.target.value }))}
           required
           placeholder="e.g. Finish IBM Capstone video"
+          autoComplete="off"
         />
       </div>
 
@@ -73,7 +78,7 @@ export default function AddTaskForm({ userId, onDone }: AddTaskFormProps) {
           className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
           rows={3}
           value={form.description}
-          onChange={(e) => setForm(v => ({ ...v, description: e.target.value }))}
+          onChange={(e) => setForm((v) => ({ ...v, description: e.target.value }))}
           placeholder="Optional details…"
         />
       </div>
@@ -84,8 +89,8 @@ export default function AddTaskForm({ userId, onDone }: AddTaskFormProps) {
           <input
             type="date"
             className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
-            value={form.dueDate.toISOString().split('T')[0]}
-            onChange={(e) => setForm(v => ({ ...v, dueDate: new Date(e.target.value) }))}
+            value={dateValue}
+            onChange={(e) => setForm((v) => ({ ...v, dueDate: new Date(e.target.value) }))}
           />
         </div>
         <div>
@@ -93,7 +98,9 @@ export default function AddTaskForm({ userId, onDone }: AddTaskFormProps) {
           <select
             className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
             value={form.priority}
-            onChange={(e) => setForm(v => ({ ...v, priority: e.target.value as any }))}
+            onChange={(e) =>
+              setForm((v) => ({ ...v, priority: e.target.value as TaskInputModel['priority'] }))
+            }
           >
             <option value="low">Low</option>
             <option value="medium">Medium</option>
@@ -107,7 +114,11 @@ export default function AddTaskForm({ userId, onDone }: AddTaskFormProps) {
             min={1}
             className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
             value={form.estimatedTime}
-            onChange={(e) => setForm(v => ({ ...v, estimatedTime: parseInt(e.target.value || '60', 10) }))}
+            onChange={(e) => {
+              const n = Number.parseInt(e.target.value || '60', 10);
+              const safe = Number.isNaN(n) ? 60 : Math.max(1, n);
+              setForm((v) => ({ ...v, estimatedTime: safe }));
+            }}
           />
         </div>
       </div>
@@ -119,13 +130,15 @@ export default function AddTaskForm({ userId, onDone }: AddTaskFormProps) {
           value={tagsText}
           onChange={(e) => setTagsText(e.target.value)}
           placeholder="ibm, course, ui"
+          autoComplete="off"
         />
       </div>
 
       <button
         type="submit"
-        disabled={loading}
+        disabled={loading || !form.title.trim()}
         className="w-full py-2 rounded-xl font-semibold bg-blue-600 hover:bg-blue-500 disabled:opacity-50"
+        aria-busy={loading}
       >
         {loading ? 'Adding…' : 'Add Task'}
       </button>

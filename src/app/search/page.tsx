@@ -1,13 +1,11 @@
 // src/app/search/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
 import { useRouter, useSearchParams } from 'next/navigation';
-import {
-  BookOpen, NotebookText, KanbanSquare, Loader2,
-} from 'lucide-react';
+import { BookOpen, NotebookText, KanbanSquare } from 'lucide-react';
 
 import { Course, CourseService } from '@/lib/firebase/courses';
 import { Lesson, LessonService } from '@/lib/firebase/lessons';
@@ -15,8 +13,17 @@ import { Task, TaskService } from '@/lib/firebase/tasks';
 
 type Scope = 'all' | 'courses' | 'lessons' | 'tasks';
 
-/* ===== Reusable GlassCard (selaras halaman lain) ===== */
-function GlassCard({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+/* ==== Extra typings untuk hindari `any` pada Lesson ==== */
+type LessonExtra = {
+  type?: 'reading' | 'video' | 'project' | 'quiz';
+  status?: 'todo' | 'in_progress' | 'done';
+  courseId?: string;
+  estimatedTime?: number;
+};
+const asLessonExtra = (l: Lesson): LessonExtra => l as unknown as LessonExtra;
+
+/* ===== Reusable GlassCard ===== */
+function GlassCard({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <div
       className={[
@@ -28,6 +35,39 @@ function GlassCard({ children, className = '' }: { children: React.ReactNode; cl
     >
       {children}
     </div>
+  );
+}
+
+/* ===== Section wrapper: kirimkan `isEmpty` eksplisit ===== */
+function Section({
+  title,
+  icon,
+  emptyText,
+  isEmpty,
+  children,
+}: {
+  title: string;
+  icon: ReactNode;
+  emptyText: string;
+  isEmpty: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center gap-2">
+        {icon}
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{title}</h2>
+      </div>
+      {isEmpty ? (
+        <GlassCard>
+          <div className="p-6 text-sm text-slate-600 dark:text-slate-400 border border-dashed border-slate-200 dark:border-slate-700 rounded-xl">
+            {emptyText}
+          </div>
+        </GlassCard>
+      ) : (
+        children
+      )}
+    </section>
   );
 }
 
@@ -56,7 +96,9 @@ export default function GlobalSearchPage() {
           TaskService.getTasks(user.uid),
         ]);
         if (!cancelled) {
-          setCourses(c); setLessons(l); setTasks(t);
+          setCourses(c);
+          setLessons(l);
+          setTasks(t);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -72,9 +114,10 @@ export default function GlobalSearchPage() {
     const fc = courses.filter((c) =>
       matches(c.title) || matches(c.description) || matches(c.category) || matches(c.difficulty),
     );
-    const fl = lessons.filter((l) =>
-      matches(l.title) || matches(l.description) || matches((l as any).type) || matches((l as any).status),
-    );
+    const fl = lessons.filter((l) => {
+      const lx = asLessonExtra(l);
+      return matches(l.title) || matches(l.description) || matches(lx.type) || matches(lx.status);
+    });
     const ft = tasks.filter((t) =>
       matches(t.title) || matches(t.description) || (t.tags || []).some((tag) => matches(tag)),
     );
@@ -170,6 +213,7 @@ export default function GlobalSearchPage() {
                 title="Courses"
                 icon={<BookOpen className="h-5 w-5 text-blue-500" />}
                 emptyText={q ? 'No courses match your query.' : 'Start by typing something above.'}
+                isEmpty={filtered.fc.length === 0}
               >
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                   {filtered.fc.map((c) => (
@@ -208,41 +252,46 @@ export default function GlobalSearchPage() {
                 title="Lessons"
                 icon={<NotebookText className="h-5 w-5 text-purple-500" />}
                 emptyText={q ? 'No lessons match your query.' : 'Start by typing something above.'}
+                isEmpty={filtered.fl.length === 0}
               >
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                  {filtered.fl.map((l) => (
-                    <GlassCard key={l.id}>
-                      <div className="p-6">
-                        <h3 className="font-semibold text-slate-900 dark:text-white">{l.title}</h3>
-                        <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2">{l.description}</p>
-                        <div className="mt-3 flex items-center gap-2 text-xs">
-                          <span
-                            className={`px-2 py-1 rounded ${
-                              l.status === 'done'
-                                ? 'bg-green-500/15 text-green-600 dark:text-green-400'
-                                : l.status === 'in_progress'
-                                ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                                : 'bg-slate-500/15 text-slate-600 dark:text-slate-300'
-                            }`}
-                          >
-                            {l.status}
-                          </span>
-                          <span className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300">
-                            {l.type}
-                          </span>
-                          {l.estimatedTime ? <span>{l.estimatedTime}m</span> : null}
+                  {filtered.fl.map((l) => {
+                    const lx = asLessonExtra(l);
+                    const courseHref = lx.courseId ? `/courses/${lx.courseId}` : '#';
+                    return (
+                      <GlassCard key={l.id}>
+                        <div className="p-6">
+                          <h3 className="font-semibold text-slate-900 dark:text-white">{l.title}</h3>
+                          <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2">{l.description}</p>
+                          <div className="mt-3 flex items-center gap-2 text-xs">
+                            <span
+                              className={`px-2 py-1 rounded ${
+                                l.status === 'done'
+                                  ? 'bg-green-500/15 text-green-600 dark:text-green-400'
+                                  : l.status === 'in_progress'
+                                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                  : 'bg-slate-500/15 text-slate-600 dark:text-slate-300'
+                              }`}
+                            >
+                              {l.status}
+                            </span>
+                            <span className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300">
+                              {lx.type || 'reading'}
+                            </span>
+                            {typeof lx.estimatedTime === 'number' ? <span>{lx.estimatedTime}m</span> : null}
+                          </div>
+                          <div className="mt-4">
+                            <Link
+                              href={courseHref}
+                              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-sm hover:bg-purple-700"
+                            >
+                              Open Course
+                            </Link>
+                          </div>
                         </div>
-                        <div className="mt-4">
-                          <Link
-                            href={`/courses/${(l as any).courseId ?? ''}`}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-sm hover:bg-purple-700"
-                          >
-                            Open Course
-                          </Link>
-                        </div>
-                      </div>
-                    </GlassCard>
-                  ))}
+                      </GlassCard>
+                    );
+                  })}
                 </div>
               </Section>
             )}
@@ -252,6 +301,7 @@ export default function GlobalSearchPage() {
                 title="Tasks"
                 icon={<KanbanSquare className="h-5 w-5 text-emerald-500" />}
                 emptyText={q ? 'No tasks match your query.' : 'Start by typing something above.'}
+                isEmpty={filtered.ft.length === 0}
               >
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                   {filtered.ft.map((t) => (
@@ -282,8 +332,11 @@ export default function GlobalSearchPage() {
                           >
                             {t.priority}
                           </span>
-                          {(t.tags || []).slice(0, 3).map((tag, i) => (
-                            <span key={i} className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300">
+                          {(t.tags || []).slice(0, 3).map((tag) => (
+                            <span
+                              key={`${t.id}-${tag}`}
+                              className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-900/50 text-slate-600 dark:text-slate-300"
+                            >
                               #{tag}
                             </span>
                           ))}
@@ -314,33 +367,5 @@ export default function GlobalSearchPage() {
         )}
       </div>
     </div>
-  );
-}
-
-/* ===== Section wrapper seragam ===== */
-function Section({
-  title, icon, emptyText, children,
-}: { title: string; icon: React.ReactNode; emptyText: string; children: React.ReactNode }) {
-  const isEmpty = !children || (Array.isArray(children) && (children as any).length === 0)
-    || (typeof children === 'object' && 'props' in (children as any) &&
-        Array.isArray((children as any).props?.children) &&
-        (children as any).props.children.length === 0);
-
-  return (
-    <section className="space-y-4">
-      <div className="flex items-center gap-2">
-        {icon}
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{title}</h2>
-      </div>
-      {isEmpty ? (
-        <GlassCard>
-          <div className="p-6 text-sm text-slate-600 dark:text-slate-400 border border-dashed border-slate-200 dark:border-slate-700 rounded-xl">
-            {emptyText}
-          </div>
-        </GlassCard>
-      ) : (
-        children
-      )}
-    </section>
   );
 }

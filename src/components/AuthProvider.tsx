@@ -8,7 +8,7 @@ import {
   User,
   signOut,
 } from 'firebase/auth';
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
 import { auth } from '@/lib/firebase';
 
 type Role = 'superadmin' | 'admin' | 'editor' | 'user';
@@ -21,7 +21,7 @@ type Ctx = {
   claims: Record<string, unknown> | null;
   /** Force-refresh id token & claims; return fresh id token (atau null kalau belum login). */
   getToken: (force?: boolean) => Promise<string | null>;
-  /** Logout helper (tetap sama dengan sebelumnya). */
+  /** Logout helper. */
   logout: () => Promise<void>;
 };
 
@@ -37,9 +37,12 @@ const defaultCtx: Ctx = {
 
 const AuthCtx = createContext<Ctx>(defaultCtx);
 
-function roleFromClaims(claims: any): Role {
-  const r = claims?.role;
-  return r === 'superadmin' || r === 'admin' || r === 'editor' ? r : 'user';
+function roleFromClaims(claims: unknown): Role {
+  if (claims && typeof claims === 'object') {
+    const r = (claims as { role?: unknown }).role;
+    if (r === 'superadmin' || r === 'admin' || r === 'editor') return r;
+  }
+  return 'user';
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -48,17 +51,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [claims, setClaims] = useState<Record<string, unknown> | null>(null);
   const [role, setRole] = useState<Role>('user');
 
-  async function refreshClaims(u: User | null, force = false) {
-    if (!u) {
-      setClaims(null);
-      setRole('user');
-      return null;
-    }
-    const res = await getIdTokenResult(u, force);
-    setClaims(res.claims || null);
-    setRole(roleFromClaims(res.claims));
-    return res.token;
-  }
+  const refreshClaims = useCallback(
+    async (u: User | null, force = false): Promise<string | null> => {
+      if (!u) {
+        setClaims(null);
+        setRole('user');
+        return null;
+      }
+      const res = await getIdTokenResult(u, force);
+      const c = (res.claims ?? null) as Record<string, unknown> | null;
+      setClaims(c);
+      setRole(roleFromClaims(c));
+      return res.token ?? null;
+    },
+    [],
+  );
 
   useEffect(() => {
     // 1) saat user berubah (login/logout)
@@ -75,14 +82,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       unsubAuth();
       unsubToken();
     };
-  }, []);
+  }, [refreshClaims]);
 
-  const getToken = async (force = false) => {
-    const u = auth.currentUser;
-    if (!u) return null;
-    const token = await refreshClaims(u, force);
-    return token ?? null;
-  };
+  const getToken = useCallback(
+    async (force = false): Promise<string | null> => {
+      const u = auth.currentUser;
+      if (!u) return null;
+      const token = await refreshClaims(u, force);
+      return token ?? null;
+    },
+    [refreshClaims],
+  );
 
   const value = useMemo<Ctx>(
     () => ({
@@ -94,7 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       getToken,
       logout: () => signOut(auth),
     }),
-    [user, loading, role, claims],
+    [user, loading, role, claims, getToken],
   );
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;

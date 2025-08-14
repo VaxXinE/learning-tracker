@@ -17,7 +17,6 @@ import { LessonService } from '@/lib/firebase/lessons';
 import type { Course } from '@/lib/firebase/courses';
 import type { Task } from '@/lib/firebase/tasks';
 import type { Lesson } from '@/lib/firebase/lessons';
-import { Timestamp } from 'firebase/firestore';
 
 /* ================= Small UI helpers ================= */
 
@@ -94,27 +93,83 @@ function ProgressRing({
   );
 }
 
-/* ================= Data helpers ================= */
+/* ================= Data helpers (tanpa any) ================= */
+
+type UnknownDate =
+  | Date
+  | { toDate?: () => Date }
+  | string
+  | number
+  | null
+  | undefined;
+
+function asDate(value: UnknownDate): Date | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) return value;
+  if (typeof value === 'string') return new Date(value);
+  if (typeof value === 'number') return new Date(value);
+  if (typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+    const d = value.toDate();
+    return d instanceof Date ? d : undefined;
+  }
+  return undefined;
+}
+function asMillis(value: UnknownDate): number {
+  const d = asDate(value);
+  return d ? d.getTime() : 0;
+}
+
+type LessonExtra = {
+  status?: 'done' | 'in_progress' | 'todo';
+  completed?: boolean;
+  completedAt?: UnknownDate;
+  updatedAt?: UnknownDate;
+  createdAt?: UnknownDate;
+  scheduledAt?: UnknownDate;
+  dueDate?: UnknownDate;
+  courseId?: string;
+  title?: string;
+};
+function lessonExtra(l: Lesson): LessonExtra {
+  return l as unknown as LessonExtra;
+}
+
+type TaskExtra = {
+  updatedAt?: UnknownDate;
+  createdAt?: UnknownDate;
+  dueDate?: UnknownDate;
+};
+function taskExtra(t: Task): TaskExtra {
+  return t as unknown as TaskExtra;
+}
+
+type CourseExtra = {
+  progress?: number;
+  estimatedHours?: number;
+  lastAccessed?: UnknownDate;
+};
+function courseExtra(c: Course): CourseExtra {
+  return c as unknown as CourseExtra;
+}
 
 function lessonStatus(l: Lesson): 'done' | 'in_progress' | 'todo' {
-  const raw = (l as any).status as string | undefined;
-  const completed = (l as any).completed as boolean | undefined;
-  if (raw === 'done' || completed) return 'done';
-  if (raw === 'in_progress') return 'in_progress';
+  const ex = lessonExtra(l);
+  if (ex.status === 'done' || ex.completed) return 'done';
+  if (ex.status === 'in_progress') return 'in_progress';
   return 'todo';
 }
-function relevantLessonTs(l: Lesson): Timestamp | undefined {
-  const any = l as any;
-  return any.completedAt || any.updatedAt || any.createdAt;
+function relevantLessonDate(l: Lesson): Date | undefined {
+  const ex = lessonExtra(l);
+  return asDate(ex.completedAt) ?? asDate(ex.updatedAt) ?? asDate(ex.createdAt);
 }
-function scheduleTs(l: Lesson): Timestamp | undefined {
-  const any = l as any;
-  return any.scheduledAt || any.dueDate;
+function scheduleDate(l: Lesson): Date | undefined {
+  const ex = lessonExtra(l);
+  return asDate(ex.scheduledAt) ?? asDate(ex.dueDate);
 }
 
 /* ================= Page ================= */
 
-export default function Dashboard() {
+export default function Dashboard(): React.ReactElement {
   const { user } = useAuth();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
@@ -153,7 +208,7 @@ export default function Dashboard() {
   const lessonsByCourse = useMemo(() => {
     const map = new Map<string, Lesson[]>();
     for (const l of lessons) {
-      const cid = (l as any).courseId as string | undefined;
+      const cid = lessonExtra(l).courseId;
       if (!cid) continue;
       if (!map.has(cid)) map.set(cid, []);
       map.get(cid)!.push(l);
@@ -164,18 +219,20 @@ export default function Dashboard() {
   const courseProgressMap = useMemo(() => {
     const out = new Map<string, number>();
     for (const c of courses) {
-      const list = lessonsByCourse.get(c.id!);
-      if (list?.length) {
+      const list = lessonsByCourse.get(c.id ?? '');
+      if (list && list.length > 0) {
         const done = list.filter((l) => lessonStatus(l) === 'done').length;
-        out.set(c.id!, Math.round((done / list.length) * 100));
+        out.set(c.id ?? '', Math.round((done / list.length) * 100));
       } else {
-        out.set(c.id!, c.progress ?? 0);
+        const p = courseExtra(c).progress ?? 0;
+        out.set(c.id ?? '', p);
       }
     }
     return out;
   }, [courses, lessonsByCourse]);
 
-  const getCourseProgress = (c: Course) => courseProgressMap.get(c.id!) ?? (c.progress ?? 0);
+  const getCourseProgress = (c: Course): number =>
+    courseProgressMap.get(c.id ?? '') ?? (courseExtra(c).progress ?? 0);
 
   /* ---------- KPIs & trends ---------- */
 
@@ -186,7 +243,10 @@ export default function Dashboard() {
       const p = getCourseProgress(c);
       return p > 0 && p < 100;
     }).length;
-    const estHours = courses.reduce((s, c) => s + (c.estimatedHours || 0), 0);
+    const estHours = courses.reduce(
+      (s, c) => s + (courseExtra(c).estimatedHours ?? 0),
+      0,
+    );
     return { total, completed, inProgress, estHours };
   }, [courses, courseProgressMap]);
 
@@ -195,8 +255,9 @@ export default function Dashboard() {
     const completed = lessons.filter((l) => lessonStatus(l) === 'done').length;
     const inProgress = total - completed;
     const upcoming = lessons
-      .filter((l) => scheduleTs(l) instanceof Timestamp)
-      .filter((l) => scheduleTs(l)!.toDate() > new Date()).length;
+      .map((l) => scheduleDate(l))
+      .filter((d): d is Date => d instanceof Date)
+      .filter((d) => d > new Date()).length;
     return { total, completed, inProgress, upcoming };
   }, [lessons]);
 
@@ -204,9 +265,10 @@ export default function Dashboard() {
     const total = tasks.length;
     const completed = tasks.filter((t) => t.status === 'done').length;
     const inProgress = tasks.filter((t) => t.status === 'in_progress').length;
-    const overdue = tasks.filter(
-      (t) => t.dueDate?.toDate?.() && t.dueDate!.toDate() < new Date() && t.status !== 'done',
-    ).length;
+    const overdue = tasks.filter((t) => {
+      const due = asDate(taskExtra(t).dueDate);
+      return !!due && due < new Date() && t.status !== 'done';
+    }).length;
     return { total, completed, inProgress, overdue };
   }, [tasks]);
 
@@ -218,18 +280,19 @@ export default function Dashboard() {
     return 0.6 * avgCourse + 0.4 * taskCompletion;
   }, [courses, courseProgressMap, taskStats]);
 
-  const lessonTrend = useMemo(() => {
-    const days: { date: string; completed: number; total: number }[] = [];
+  type TrendPoint = { date: string; completed: number; total: number };
+  const lessonTrend: TrendPoint[] = useMemo(() => {
+    const days: TrendPoint[] = [];
     const today = new Date();
     for (let i = 6; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
+      const keyISO = d.toISOString().slice(0, 10);
       const comp = lessons.filter((l) => {
         if (lessonStatus(l) !== 'done') return false;
-        const ts = relevantLessonTs(l);
-        const ds = (ts?.toDate?.() || new Date()).toISOString().slice(0, 10);
-        return ds === key;
+        const ts = relevantLessonDate(l) ?? new Date();
+        const ds = ts.toISOString().slice(0, 10);
+        return ds === keyISO;
       }).length;
       const tot = Math.max(comp, comp + Math.floor(Math.random() * 2));
       days.push({
@@ -242,18 +305,25 @@ export default function Dashboard() {
   }, [lessons]);
 
   const recentTasks = useMemo(() => {
-    const toMs = (t: Task) =>
-      (t as any).updatedAt?.toMillis?.() ?? (t as any).createdAt?.toMillis?.() ?? t.dueDate?.toMillis?.() ?? 0;
+    const toMs = (t: Task) => {
+      const ex = taskExtra(t);
+      return (
+        asMillis(ex.updatedAt) ||
+        asMillis(ex.createdAt) ||
+        asMillis(ex.dueDate)
+      );
+    };
     return [...tasks].sort((a, b) => toMs(b) - toMs(a)).slice(0, 5);
   }, [tasks]);
 
   const upcomingLessons = useMemo(() => {
     const withDate = lessons
-      .map((l) => ({ l, ts: scheduleTs(l) }))
-      .filter((x) => x.ts instanceof Timestamp) as { l: Lesson; ts: Timestamp }[];
+      .map((l) => ({ lesson: l, when: scheduleDate(l) }))
+      .filter((x): x is { lesson: Lesson; when: Date } => x.when instanceof Date);
+
     return withDate
-      .sort((a, b) => a.ts.toMillis() - b.ts.toMillis())
-      .map((x) => x.l)
+      .sort((a, b) => a.when.getTime() - b.when.getTime())
+      .map((x) => x.lesson)
       .slice(0, 5);
   }, [lessons]);
 
@@ -299,7 +369,6 @@ export default function Dashboard() {
         text-slate-900 dark:text-white
       "
     >
-      {/* gunakan lebar penuh: max-w-screen-2xl (≈1536px) atau 2xl custom */}
       <div className="mx-auto w-full max-w-screen-2xl 2xl:max-w-[1600px] space-y-6">
         {/* Header */}
         <div className="text-center mb-2">
@@ -340,7 +409,6 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* tingginya responsif terhadap viewport */}
               <div className="h-[32vh] min-h-[260px] max-h-[420px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={lessonTrend}>
@@ -445,9 +513,9 @@ export default function Dashboard() {
                     </div>
                   )}
                   {recentTasks.map((t) => {
-                    const due = t.dueDate?.toDate?.() ?? new Date();
+                    const due = asDate(taskExtra(t).dueDate) ?? new Date();
                     const overdue = due < new Date() && t.status !== 'done';
-                    const badge =
+                    const badgeClass =
                       t.status === 'done'
                         ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
                         : t.status === 'in_progress'
@@ -458,7 +526,7 @@ export default function Dashboard() {
                            className="p-4 rounded-lg border border-gray-200 dark:border-white/10 hover:shadow-md transition-shadow">
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-2">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${badge}`}>
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${badgeClass}`}>
                               {t.status === 'done' ? 'Completed' : t.status === 'in_progress' ? 'In Progress' : 'To Do'}
                             </span>
                             {overdue && (
@@ -536,11 +604,11 @@ export default function Dashboard() {
                       No upcoming lessons.
                     </div>
                   )}
-                  {upcomingLessons.map((l) => {
-                    const when: Date = scheduleTs(l)?.toDate?.() ?? new Date();
-                    const course = courses.find((c) => c.id === (l as any).courseId);
+                  {upcomingLessons.map((l, idx) => {
+                    const when = scheduleDate(l) ?? new Date();
+                    const course = courses.find((c) => c.id === lessonExtra(l).courseId);
                     return (
-                      <div key={(l as any).id || JSON.stringify(l)}
+                      <div key={l.id ?? `up-${idx}`}
                            className="p-4 rounded-lg border border-gray-200 dark:border-white/10 hover:shadow-md transition-shadow">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-xs text-slate-500 dark:text-slate-400">
@@ -551,7 +619,7 @@ export default function Dashboard() {
                           </span>
                         </div>
                         <div className="font-medium text-slate-900 dark:text-white">
-                          {(l as any).title || 'Lesson'}
+                          {lessonExtra(l).title || 'Lesson'}
                         </div>
                         {course && <div className="text-sm text-slate-600 dark:text-slate-300/90">{course.title}</div>}
                       </div>

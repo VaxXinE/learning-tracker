@@ -1,9 +1,10 @@
+// src/app/tasks/page.tsx  (atau lokasi file kamu)
 'use client';
 
 import React, { useState, useEffect, useMemo, DragEvent, ChangeEvent } from 'react';
 import {
   CheckCircle2, Circle, PlayCircle, Clock, Calendar, AlertCircle, Trash2,
-  Timer, Play, RotateCcw, Zap, Target, TrendingUp, Award, Flame
+  Timer, Play, RotateCcw, Zap, Target, TrendingUp, Award, Flame,
 } from 'lucide-react';
 import { TaskService } from '@/lib/firebase/tasks';
 import { useAuth } from '@/components/AuthProvider';
@@ -20,12 +21,10 @@ function GlassCard({
 }) {
   return (
     <div
-      className={
-        `rounded-2xl backdrop-blur-xl 
+      className={`rounded-2xl backdrop-blur-xl 
          bg-white/80 dark:bg-slate-800/50 
          border border-white/20 dark:border-slate-700/50 
-         shadow-lg ${className}`
-      }
+         shadow-lg ${className}`}
     >
       {children}
     </div>
@@ -34,12 +33,15 @@ function GlassCard({
 
 /* ================= Types ================= */
 
+type Status = 'todo' | 'in_progress' | 'done';
+type Priority = 'low' | 'medium' | 'high';
+
 interface Task {
   id: string;
   title: string;
   description: string;
-  status: 'todo' | 'in_progress' | 'done';
-  priority: 'low' | 'medium' | 'high';
+  status: Status;
+  priority: Priority;
   dueDate: Timestamp;
   tags: string[];
   estimatedTime: number;
@@ -51,19 +53,29 @@ interface Task {
 interface TaskInput {
   title: string;
   description: string;
-  priority: 'low' | 'medium' | 'high';
+  priority: Priority;
   dueDate: Date;
   estimatedTime: number;
-  tags: string;
+  tags: string; // comma separated
 }
 
 interface StatusColumn {
-  key: 'todo' | 'in_progress' | 'done';
+  key: Status;
   title: string;
   icon: React.ComponentType<{ className?: string }>;
   iconClass: string;
-  countPillClass: string; // bg + border + text (hindari kelas dinamis Tailwind)
+  countPillClass: string; // kelas tailwind statis (hindari string dinamis yang tak ter-trace)
 }
+
+/* Payload aman untuk createTask */
+type NewTaskPayload = {
+  title: string;
+  description: string;
+  priority: Priority;
+  dueDate: Date;
+  estimatedTime: number;
+  tags: string[];
+};
 
 /* ================= Pomodoro ================= */
 
@@ -74,7 +86,7 @@ const PomodoroTimer: React.FC = () => {
   const [sessions, setSessions] = useState<number>(0);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
     if (isActive && timeLeft > 0) {
       interval = setInterval(() => setTimeLeft((t) => t - 1), 1000);
     } else if (timeLeft === 0) {
@@ -88,39 +100,54 @@ const PomodoroTimer: React.FC = () => {
         setIsBreak(false);
       }
     }
-    return () => { if (interval) clearInterval(interval); };
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, [isActive, timeLeft, isBreak]);
 
-  const toggleTimer = (): void => setIsActive(!isActive);
-  const resetTimer = (): void => { setIsActive(false); setTimeLeft(isBreak ? 5 * 60 : 25 * 60); };
+  const toggleTimer = (): void => setIsActive((v) => !v);
+  const resetTimer = (): void => {
+    setIsActive(false);
+    setTimeLeft(isBreak ? 5 * 60 : 25 * 60);
+  };
   const formatTime = (seconds: number): string =>
-    `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`;
+    `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60)
+      .toString()
+      .padStart(2, '0')}`;
 
   return (
     <GlassCard>
       <div className="p-4">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Timer className={`w-5 h-5 ${isBreak ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`} />
+            <Timer
+              className={`w-5 h-5 ${
+                isBreak ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+              }`}
+            />
             <span className="font-semibold text-slate-900 dark:text-white">
               {isBreak ? 'Break Time' : 'Focus Time'}
             </span>
           </div>
           <div className="flex items-center gap-1 text-sm text-slate-600 dark:text-slate-400">
-            <Flame className="w-4 h-4 text-orange-500 dark:text-orange-400" /><span>{sessions}</span>
+            <Flame className="w-4 h-4 text-orange-500 dark:text-orange-400" />
+            <span>{sessions}</span>
           </div>
         </div>
 
         <div className="text-center mb-4">
-          <div className="text-3xl font-bold text-slate-900 dark:text-white mb-2">{formatTime(timeLeft)}</div>
+          <div className="text-3xl font-bold text-slate-900 dark:text-white mb-2">
+            {formatTime(timeLeft)}
+          </div>
           <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
             <div
               className={`h-2 rounded-full transition-all duration-1000 ${
-                isBreak ? 'bg-gradient-to-r from-green-500 to-emerald-500'
-                        : 'bg-gradient-to-r from-red-500 to-pink-500'
+                isBreak ? 'bg-gradient-to-r from-green-500 to-emerald-500' : 'bg-gradient-to-r from-red-500 to-pink-500'
               }`}
               style={{
-                width: `${((isBreak ? 300 : 1500) - timeLeft) / (isBreak ? 300 : 1500) * 100}%`
+                width: `${
+                  (((isBreak ? 300 : 1500) - timeLeft) / (isBreak ? 300 : 1500)) * 100
+                }%`,
               }}
             />
           </div>
@@ -156,9 +183,9 @@ const PomodoroTimer: React.FC = () => {
 export default function EnhancedTasksUI(): React.ReactElement {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedPriority, setSelectedPriority] = useState<string>('All');
-  const [selectedStatus, setSelectedStatus] = useState<string>('All');
-  const [sortBy, setSortBy] = useState<string>('dueDate');
+  const [selectedPriority, setSelectedPriority] = useState<'All' | Priority>('All');
+  const [selectedStatus, setSelectedStatus] = useState<'All' | Status>('All');
+  const [sortBy, setSortBy] = useState<'dueDate' | 'priority' | 'title' | 'createdAt'>('dueDate');
   const [draggedTask, setDraggedTask] = useState<Task | null>(null);
 
   const [newTask, setNewTask] = useState<TaskInput>({
@@ -167,16 +194,19 @@ export default function EnhancedTasksUI(): React.ReactElement {
     priority: 'medium',
     dueDate: new Date(),
     estimatedTime: 60,
-    tags: ''
+    tags: '',
   });
 
   const [loading, setLoading] = useState<boolean>(true);
   const { user } = useAuth();
 
   useEffect(() => {
-    if (!user) { setLoading(false); return; }
-    const unsubscribe = TaskService.subscribeToTasks(user.uid, (docs) => {
-      setTasks((docs || []).filter((t) => t.id) as Task[]);
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    const unsubscribe = TaskService.subscribeToTasks(user.uid, (docs: Task[] = []) => {
+      setTasks(docs.filter(Boolean));
       setLoading(false);
     });
     return () => unsubscribe();
@@ -185,31 +215,32 @@ export default function EnhancedTasksUI(): React.ReactElement {
   const handleCreateTask = async () => {
     if (!user || !newTask.title.trim()) return;
     try {
-      await TaskService.createTask(
-        {
-          title: newTask.title,
-          description: newTask.description,
-          priority: newTask.priority as 'low' | 'medium' | 'high',
-          dueDate: newTask.dueDate,
-          estimatedTime: newTask.estimatedTime,
-          tags: newTask.tags.split(',').map((t) => t.trim()).filter(Boolean),
-        } as any,
-        user.uid
-      );
+      const payload: NewTaskPayload = {
+        title: newTask.title,
+        description: newTask.description,
+        priority: newTask.priority,
+        dueDate: newTask.dueDate,
+        estimatedTime: newTask.estimatedTime,
+        tags: newTask.tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0),
+      };
+      await TaskService.createTask(payload as unknown as NewTaskPayload, user.uid);
       setNewTask({
         title: '',
         description: '',
         priority: 'medium',
         dueDate: new Date(),
         estimatedTime: 60,
-        tags: ''
+        tags: '',
       });
     } catch (err) {
       console.error('Task creation error:', err);
     }
   };
 
-  const handleStatusChange = async (taskId: string, newStatus: 'todo' | 'in_progress' | 'done') => {
+  const handleStatusChange = async (taskId: string, newStatus: Status) => {
     if (!user) return;
     await TaskService.updateTask(taskId, { status: newStatus });
   };
@@ -217,9 +248,9 @@ export default function EnhancedTasksUI(): React.ReactElement {
     if (!user) return;
     await TaskService.deleteTask(taskId);
   };
-  const handleDragStart = (e: DragEvent<HTMLDivElement>, task: Task) => setDraggedTask(task);
+  const handleDragStart = (_e: DragEvent<HTMLDivElement>, task: Task) => setDraggedTask(task);
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => e.preventDefault();
-  const handleDrop = (e: DragEvent<HTMLDivElement>, newStatus: 'todo' | 'in_progress' | 'done') => {
+  const handleDrop = (e: DragEvent<HTMLDivElement>, newStatus: Status) => {
     e.preventDefault();
     if (draggedTask && draggedTask.status !== newStatus) handleStatusChange(draggedTask.id, newStatus);
     setDraggedTask(null);
@@ -244,42 +275,48 @@ export default function EnhancedTasksUI(): React.ReactElement {
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(t =>
-        t.title.toLowerCase().includes(q) || t.description.toLowerCase().includes(q)
+      filtered = filtered.filter(
+        (t) => t.title.toLowerCase().includes(q) || t.description.toLowerCase().includes(q),
       );
     }
-    if (selectedPriority !== 'All') filtered = filtered.filter(t => t.priority === selectedPriority);
-    if (selectedStatus !== 'All') filtered = filtered.filter(t => t.status === selectedStatus);
+    if (selectedPriority !== 'All') filtered = filtered.filter((t) => t.priority === selectedPriority);
+    if (selectedStatus !== 'All') filtered = filtered.filter((t) => t.status === selectedStatus);
 
     return filtered.sort((a, b) => {
       switch (sortBy) {
-        case 'dueDate': return a.dueDate.toMillis() - b.dueDate.toMillis();
+        case 'dueDate':
+          return a.dueDate.toMillis() - b.dueDate.toMillis();
         case 'priority': {
-          const order = { high: 3, medium: 2, low: 1 } as const;
+          const order: Record<Priority, number> = { high: 3, medium: 2, low: 1 };
           return order[b.priority] - order[a.priority];
         }
-        case 'title': return a.title.localeCompare(b.title);
-        default: return a.createdAt.toMillis() - b.createdAt.toMillis();
+        case 'title':
+          return a.title.localeCompare(b.title);
+        case 'createdAt':
+        default:
+          return a.createdAt.toMillis() - b.createdAt.toMillis();
       }
     });
   }, [tasks, searchQuery, selectedPriority, selectedStatus, sortBy, user]);
 
   const tasksByStatus = useMemo(() => {
-    const grouped: Record<string, Task[]> = { todo: [], in_progress: [], done: [] };
-    filteredTasks.forEach((t) => { if (grouped[t.status]) grouped[t.status].push(t); });
+    const grouped: Record<Status, Task[]> = { todo: [], in_progress: [], done: [] };
+    filteredTasks.forEach((t) => {
+      grouped[t.status].push(t);
+    });
     return grouped;
   }, [filteredTasks]);
 
   const stats = useMemo(() => {
-    if (!user || tasks.length === 0) return { total: 0, completed: 0, inProgress: 0, overdue: 0 };
+    if (!user || tasks.length === 0)
+      return { total: 0, completed: 0, inProgress: 0, overdue: 0 };
     const total = tasks.length;
-    const completed = tasks.filter(t => t.status === 'done').length;
-    const inProgress = tasks.filter(t => t.status === 'in_progress').length;
-    const overdue = tasks.filter(t => t.dueDate.toMillis() < Date.now() && t.status !== 'done').length;
+    const completed = tasks.filter((t) => t.status === 'done').length;
+    const inProgress = tasks.filter((t) => t.status === 'in_progress').length;
+    const overdue = tasks.filter((t) => t.dueDate.toMillis() < Date.now() && t.status !== 'done').length;
     return { total, completed, inProgress, overdue };
   }, [tasks, user]);
 
-  // Hindari kelas Tailwind dinamis
   const statusColumns: StatusColumn[] = [
     {
       key: 'todo',
@@ -304,27 +341,39 @@ export default function EnhancedTasksUI(): React.ReactElement {
     },
   ];
 
-  const priorityOptions = [
+  const priorityOptions: Array<{ value: Priority; label: string }> = [
     { value: 'low', label: 'Low' },
     { value: 'medium', label: 'Medium' },
-    { value: 'high', label: 'High' }
+    { value: 'high', label: 'High' },
   ];
 
   /* ================= Loading (full-bleed) ================= */
   if (loading) {
     return (
-      <div className="
+      <div
+        className="
         min-h-[100svh] md:min-h-dvh w-full overflow-x-hidden px-3 sm:px-4 md:px-6 py-4 sm:py-6
         bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50
         dark:from-slate-900 dark:via-slate-800 dark:to-slate-900
-      ">
+      "
+      >
         <div className="mx-auto w-full max-w-screen-2xl 2xl:max-w-[1600px] space-y-6 animate-pulse">
-          <GlassCard><div className="h-12" /></GlassCard>
+          <GlassCard>
+            <div className="h-12" />
+          </GlassCard>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[...Array(4)].map((_, i) => <GlassCard key={i}><div className="h-24" /></GlassCard>)}
+            {[...Array(4)].map((_, i) => (
+              <GlassCard key={i}>
+                <div className="h-24" />
+              </GlassCard>
+            ))}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {[...Array(3)].map((_, i) => <GlassCard key={i}><div className="h-96" /></GlassCard>)}
+            {[...Array(3)].map((_, i) => (
+              <GlassCard key={i}>
+                <div className="h-96" />
+              </GlassCard>
+            ))}
           </div>
         </div>
       </div>
@@ -344,10 +393,8 @@ export default function EnhancedTasksUI(): React.ReactElement {
     >
       <div className="mx-auto w-full max-w-screen-2xl 2xl:max-w-[1600px]">
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
-
           {/* LEFT */}
           <div className="xl:col-span-3 space-y-8">
-
             {/* Stats */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <GlassCard>
@@ -394,10 +441,7 @@ export default function EnhancedTasksUI(): React.ReactElement {
             {/* Boards */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {statusColumns.map((column) => (
-                <GlassCard
-                  key={column.key}
-                  className="h-[60svh] md:h-[65svh] flex flex-col"
-                >
+                <GlassCard key={column.key} className="h-[60svh] md:h-[65svh] flex flex-col">
                   <div
                     className="p-6 h-full flex flex-col"
                     onDragOver={handleDragOver}
@@ -406,8 +450,12 @@ export default function EnhancedTasksUI(): React.ReactElement {
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-3">
                         <column.icon className={`w-5 h-5 ${column.iconClass}`} />
-                        <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{column.title}</h3>
-                        <span className={`${column.countPillClass} px-2 py-1 rounded-full text-xs font-medium`}>
+                        <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+                          {column.title}
+                        </h3>
+                        <span
+                          className={`${column.countPillClass} px-2 py-1 rounded-full text-xs font-medium`}
+                        >
                           {tasksByStatus[column.key]?.length || 0}
                         </span>
                       </div>
@@ -426,19 +474,23 @@ export default function EnhancedTasksUI(): React.ReactElement {
                           >
                             <div className="flex items-start justify-between mb-3">
                               <div className="flex items-center gap-2">
-                                <span className={`px-2 py-1 rounded-lg text-xs font-medium border ${
-                                  task.priority === 'high'
-                                    ? 'bg-red-100 text-red-700 border-red-200 dark:bg-red-500/20 dark:text-red-300 dark:border-red-500/30'
-                                    : task.priority === 'medium'
-                                    ? 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30'
-                                    : 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-500/30'
-                                }`}>
+                                <span
+                                  className={`px-2 py-1 rounded-lg text-xs font-medium border ${
+                                    task.priority === 'high'
+                                      ? 'bg-red-100 text-red-700 border-red-200 dark:bg-red-500/20 dark:text-red-300 dark:border-red-500/30'
+                                      : task.priority === 'medium'
+                                      ? 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30'
+                                      : 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-500/30'
+                                  }`}
+                                >
                                   {task.priority.toUpperCase()}
                                 </span>
                                 {getDaysUntilDue(task.dueDate) < 0 && task.status !== 'done' && (
-                                  <span className="px-2 py-1 rounded-lg text-xs font-medium
+                                  <span
+                                    className="px-2 py-1 rounded-lg text-xs font-medium
                                                    bg-red-100 text-red-700 border border-red-200
-                                                   dark:bg-red-500/20 dark:text-red-300 dark:border-red-500/30 animate-pulse">
+                                                   dark:bg-red-500/20 dark:text-red-300 dark:border-red-500/30 animate-pulse"
+                                  >
                                     OVERDUE
                                   </span>
                                 )}
@@ -447,6 +499,7 @@ export default function EnhancedTasksUI(): React.ReactElement {
                                 onClick={() => handleDeleteTask(task.id)}
                                 className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded
                                            hover:bg-slate-100 dark:hover:bg-slate-700"
+                                aria-label="Delete task"
                               >
                                 <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
                               </button>
@@ -456,7 +509,9 @@ export default function EnhancedTasksUI(): React.ReactElement {
                               <h3 className="font-semibold text-slate-900 dark:text-white mb-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                                 {task.title}
                               </h3>
-                              <p className="text-slate-600 dark:text-slate-400 text-sm line-clamp-2">{task.description}</p>
+                              <p className="text-slate-600 dark:text-slate-400 text-sm line-clamp-2">
+                                {task.description}
+                              </p>
                             </div>
 
                             <div className="flex items-center gap-3 text-xs text-slate-600 dark:text-slate-400 mb-3">
@@ -466,11 +521,15 @@ export default function EnhancedTasksUI(): React.ReactElement {
                               </div>
                               <div className="flex items-center gap-1">
                                 <Calendar className="w-3 h-3" />
-                                <span className={
-                                  getDaysUntilDue(task.dueDate) < 0 ? 'text-red-600 dark:text-red-400'
-                                  : getDaysUntilDue(task.dueDate) <= 2 ? 'text-amber-600 dark:text-amber-400'
-                                  : ''
-                                }>
+                                <span
+                                  className={
+                                    getDaysUntilDue(task.dueDate) < 0
+                                      ? 'text-red-600 dark:text-red-400'
+                                      : getDaysUntilDue(task.dueDate) <= 2
+                                      ? 'text-amber-600 dark:text-amber-400'
+                                      : ''
+                                  }
+                                >
                                   {formatDate(task.dueDate)}
                                 </span>
                               </div>
@@ -478,8 +537,11 @@ export default function EnhancedTasksUI(): React.ReactElement {
 
                             {task.tags.length > 0 && (
                               <div className="flex flex-wrap gap-1 mb-3">
-                                {task.tags.map((tag: string, idx: number) => (
-                                  <span key={idx} className="px-2 py-1 bg-slate-100 text-slate-700 dark:bg-slate-700/60 dark:text-slate-200 text-xs rounded-md">
+                                {task.tags.map((tag, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="px-2 py-1 bg-slate-100 text-slate-700 dark:bg-slate-700/60 dark:text-slate-200 text-xs rounded-md"
+                                  >
                                     #{tag}
                                   </span>
                                 ))}
@@ -490,16 +552,19 @@ export default function EnhancedTasksUI(): React.ReactElement {
                               <select
                                 value={task.status}
                                 onChange={(e: ChangeEvent<HTMLSelectElement>) =>
-                                  handleStatusChange(task.id, e.target.value as 'todo' | 'in_progress' | 'done')
+                                  handleStatusChange(task.id, e.target.value as Status)
                                 }
                                 className="flex-1 px-3 py-2 rounded-lg text-sm
                                            bg-white/70 border border-slate-300 text-slate-900
                                            focus:outline-none focus:ring-2 focus:ring-blue-500
                                            dark:bg-slate-900/50 dark:border-slate-600 dark:text-white"
-                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                onClick={(e) => e.stopPropagation()}
+                                aria-label="Change task status"
                               >
                                 {statusColumns.map((status) => (
-                                  <option key={status.key} value={status.key}>{status.title}</option>
+                                  <option key={status.key} value={status.key}>
+                                    {status.title}
+                                  </option>
                                 ))}
                               </select>
                             </div>
@@ -523,7 +588,6 @@ export default function EnhancedTasksUI(): React.ReactElement {
 
           {/* RIGHT */}
           <div className="xl:col-span-1 space-y-6 xl:sticky xl:top-4 self-start">
-
             {/* Create Task Panel */}
             <GlassCard>
               <div className="p-6">
@@ -580,13 +644,21 @@ export default function EnhancedTasksUI(): React.ReactElement {
                                      focus:outline-none focus:ring-2 focus:ring-blue-500
                                      dark:bg-slate-900/50 dark:border-slate-600 dark:text-white"
                           value={newTask.priority}
-                          onChange={(e) => setNewTask((v) => ({ ...v, priority: e.target.value as any }))}
+                          onChange={(e) =>
+                            setNewTask((v) => ({ ...v, priority: e.target.value as Priority }))
+                          }
                         >
-                          {priorityOptions.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                          {priorityOptions.map((p) => (
+                            <option key={p.value} value={p.value}>
+                              {p.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm text-slate-700 dark:text-slate-300 mb-1">Est. (min)</label>
+                        <label className="block text-sm text-slate-700 dark:text-slate-300 mb-1">
+                          Est. (min)
+                        </label>
                         <input
                           type="number"
                           min={1}
@@ -595,13 +667,20 @@ export default function EnhancedTasksUI(): React.ReactElement {
                                      focus:outline-none focus:ring-2 focus:ring-blue-500
                                      dark:bg-slate-900/50 dark:border-slate-600 dark:text-white"
                           value={newTask.estimatedTime}
-                          onChange={(e) => setNewTask((v) => ({ ...v, estimatedTime: parseInt(e.target.value || '60', 10) }))}
+                          onChange={(e) =>
+                            setNewTask((v) => ({
+                              ...v,
+                              estimatedTime: parseInt(e.target.value || '60', 10),
+                            }))
+                          }
                         />
                       </div>
                     </div>
 
                     <div>
-                      <label className="block text-sm text-slate-700 dark:text-slate-300 mb-1">Tags (comma separated)</label>
+                      <label className="block text-sm text-slate-700 dark:text-slate-300 mb-1">
+                        Tags (comma separated)
+                      </label>
                       <input
                         className="w-full px-3 py-2 rounded-lg
                                    bg-white/70 border border-slate-300 text-slate-900
@@ -650,14 +729,18 @@ export default function EnhancedTasksUI(): React.ReactElement {
                     <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
                       <div
                         className="bg-gradient-to-r from-green-500 to-emerald-500 h-2 rounded-full transition-all duration-500"
-                        style={{ width: `${stats.total > 0 ? (stats.completed / stats.total) * 100 : 0}%` }}
+                        style={{
+                          width: `${stats.total > 0 ? (stats.completed / stats.total) * 100 : 0}%`,
+                        }}
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4 mt-4">
                     <div className="text-center">
-                      <p className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.completed}</p>
+                      <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                        {stats.completed}
+                      </p>
                       <p className="text-xs text-slate-600 dark:text-slate-400">Completed</p>
                     </div>
                     <div className="text-center">

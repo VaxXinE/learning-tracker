@@ -1,3 +1,4 @@
+// src/app/courses/page.tsx  (atau sesuai path file Anda)
 'use client';
 
 import React, { useMemo, useState, useEffect } from 'react';
@@ -19,7 +20,7 @@ type LessonStats = {
   todo: number;
 };
 
-/* ===== Reusable glass card (selaras dashboard) ===== */
+/* ===== Reusable glass card ===== */
 function GlassCard({
   children, className = '',
 }: { children: React.ReactNode; className?: string }) {
@@ -37,7 +38,44 @@ function GlassCard({
   );
 }
 
-export default function EnhancedCoursesUI() {
+/* ===== Helpers: akses field tambahan dengan aman (tanpa any) ===== */
+type LessonExtra = {
+  courseId?: string;
+  estimatedTime?: number;
+};
+type CourseExtra = {
+  featured?: boolean;
+  lastAccessed?: unknown; // Date | string | number | firestore Timestamp
+};
+
+function getLessonExtra(l: Lesson): LessonExtra {
+  return l as unknown as LessonExtra;
+}
+function getCourseExtra(c: Course): CourseExtra {
+  return c as unknown as CourseExtra;
+}
+type WithToDate = { toDate?: () => Date };
+function toDate(value: unknown): Date | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) return value;
+  if (typeof value === 'string') return new Date(value);
+  if (typeof value === 'number') return new Date(value);
+  if (typeof value === 'object' && value !== null && 'toDate' in (value as WithToDate)) {
+    try {
+      const d = (value as WithToDate).toDate?.();
+      return d instanceof Date ? d : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+function toMillis(value: unknown): number {
+  const d = toDate(value);
+  return d ? d.getTime() : 0;
+}
+
+export default function EnhancedCoursesUI(): React.ReactElement {
   const router = useRouter();
   const { user } = useAuth();
 
@@ -51,11 +89,17 @@ export default function EnhancedCoursesUI() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newCourse, setNewCourse] = useState({
+  const [newCourse, setNewCourse] = useState<{
+    title: string;
+    description: string;
+    category: string;
+    difficulty: Difficulty;
+    estimatedHours: number;
+  }>({
     title: '',
     description: '',
     category: 'Frontend',
-    difficulty: 'Beginner' as Difficulty,
+    difficulty: 'Beginner',
     estimatedHours: 0,
   });
 
@@ -90,14 +134,14 @@ export default function EnhancedCoursesUI() {
   const lessonStatsByCourseId = useMemo(() => {
     const map = new Map<string, LessonStats>();
     for (const l of lessons) {
-      const cid = (l as any).courseId || '';
+      const cid = getLessonExtra(l).courseId || '';
       if (!cid) continue;
       if (!map.has(cid)) {
         map.set(cid, { total: 0, done: 0, in_progress: 0, todo: 0 });
       }
       const stats = map.get(cid)!;
       stats.total += 1;
-      const s = (l.status as LessonStatus) || 'todo';
+      const s: LessonStatus = l.status;
       if (s === 'done') stats.done += 1;
       else if (s === 'in_progress') stats.in_progress += 1;
       else stats.todo += 1;
@@ -105,10 +149,10 @@ export default function EnhancedCoursesUI() {
     return map;
   }, [lessons]);
 
-  const getDerivedLessonsCount = (courseId?: string) =>
+  const getDerivedLessonsCount = (courseId?: string): number =>
     (courseId && lessonStatsByCourseId.get(courseId)?.total) || 0;
 
-  const getDerivedProgress = (courseId?: string) => {
+  const getDerivedProgress = (courseId?: string): number => {
     if (!courseId) return 0;
     const stats = lessonStatsByCourseId.get(courseId);
     if (!stats || stats.total === 0) return 0;
@@ -118,9 +162,11 @@ export default function EnhancedCoursesUI() {
   // ---- Filtering & sorting ----
   const filteredAndSortedCourses = useMemo(() => {
     const filtered = courses.filter((course) => {
+      const title = (course.title || '').toLowerCase();
+      const desc = (course.description || '').toLowerCase();
       const matchesSearch =
-        course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        course.description.toLowerCase().includes(searchQuery.toLowerCase());
+        title.includes(searchQuery.toLowerCase()) ||
+        desc.includes(searchQuery.toLowerCase());
       const matchesCategory = selectedCategory === 'All' || course.category === selectedCategory;
       return matchesSearch && matchesCategory;
     });
@@ -132,8 +178,11 @@ export default function EnhancedCoursesUI() {
         case 'progress':
           return getDerivedProgress(b.id) - getDerivedProgress(a.id);
         case 'recent':
-        default:
-          return new Date(b.lastAccessed || 0).getTime() - new Date(a.lastAccessed || 0).getTime();
+        default: {
+          const aMs = toMillis(getCourseExtra(a).lastAccessed);
+          const bMs = toMillis(getCourseExtra(b).lastAccessed);
+          return bMs - aMs;
+        }
       }
     });
   }, [courses, searchQuery, selectedCategory, sortBy, lessonStatsByCourseId]);
@@ -154,7 +203,7 @@ export default function EnhancedCoursesUI() {
   const handleCreateCourse = async () => {
     if (!user || !newCourse.title.trim()) return;
     try {
-      await CourseService.createCourse(newCourse, user.uid);
+      await CourseService.createCourse(newCourse as unknown as Course, user.uid);
       setNewCourse({
         title: '',
         description: '',
@@ -164,6 +213,7 @@ export default function EnhancedCoursesUI() {
       });
       setShowCreateModal(false);
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error('Error creating course:', error);
     }
   };
@@ -174,12 +224,13 @@ export default function EnhancedCoursesUI() {
     try {
       await CourseService.deleteCourse(courseId);
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error('Error deleting course:', error);
     }
   };
 
   // View
-  const handleViewCourse = (courseId: string) => {
+  const handleViewCourse = (courseId?: string) => {
     if (!courseId) return;
     router.push(`/courses/${courseId}`);
   };
@@ -190,13 +241,13 @@ export default function EnhancedCoursesUI() {
     setShowEditModal(true);
   };
 
-  // Edit save (progress dihitung otomatis dari lessons)
+  // Edit save
   const handleSaveEdit = async () => {
     if (!editCourseData?.id) return;
     setSavingEdit(true);
     try {
-      const { title, description, category, difficulty, estimatedHours, featured } =
-        editCourseData;
+      const { title, description, category, difficulty, estimatedHours } = editCourseData;
+      const featured = getCourseExtra(editCourseData).featured ?? false;
 
       await CourseService.updateCourse(editCourseData.id, {
         title,
@@ -204,11 +255,12 @@ export default function EnhancedCoursesUI() {
         category,
         difficulty,
         estimatedHours,
-        featured: !!featured,
+        featured,
       });
 
       setShowEditModal(false);
     } catch (err) {
+      // eslint-disable-next-line no-console
       console.error('Error updating course:', err);
     } finally {
       setSavingEdit(false);
@@ -225,7 +277,10 @@ export default function EnhancedCoursesUI() {
       Advanced:
         'border bg-red-50 text-red-700 border-red-200 dark:bg-red-500/20 dark:text-red-300 dark:border-red-500/30',
     };
-    return map[difficulty] || 'border bg-gray-50 text-gray-700 border-gray-200 dark:bg-slate-500/20 dark:text-slate-300 dark:border-slate-500/30';
+    return (
+      map[difficulty] ||
+      'border bg-gray-50 text-gray-700 border-gray-200 dark:bg-slate-500/20 dark:text-slate-300 dark:border-slate-500/30'
+    );
   };
 
   const catPill = (category: string): string => {
@@ -241,7 +296,10 @@ export default function EnhancedCoursesUI() {
       Mobile:
         'border bg-pink-50 text-pink-700 border-pink-200 dark:bg-pink-500/20 dark:text-pink-300 dark:border-pink-500/30',
     };
-    return map[category] || 'border bg-gray-50 text-gray-700 border-gray-200 dark:bg-slate-500/20 dark:text-slate-300 dark:border-slate-500/30';
+    return (
+      map[category] ||
+      'border bg-gray-50 text-gray-700 border-gray-200 dark:bg-slate-500/20 dark:text-slate-300 dark:border-slate-500/30'
+    );
   };
 
   const inputBase =
@@ -270,9 +328,6 @@ export default function EnhancedCoursesUI() {
         text-slate-900 dark:text-white
       "
     >
-      {/* NOTE: tidak ada header/breadcrumb lokal di sini agar tidak duplikat dengan AppHeader */}
-
-      {/* Main Content */}
       <div className="mx-auto w-full max-w-screen-2xl 2xl:max-w-[1600px] space-y-8">
         {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
@@ -383,6 +438,7 @@ export default function EnhancedCoursesUI() {
             {filteredAndSortedCourses.map((course) => {
               const progress = getDerivedProgress(course.id);
               const lessonsCount = getDerivedLessonsCount(course.id);
+              const featured = getCourseExtra(course).featured ?? false;
 
               return (
                 <GlassCard key={course.id} className="hover:shadow-xl transition-all">
@@ -392,9 +448,13 @@ export default function EnhancedCoursesUI() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
                           <h3 className="text-xl font-semibold">{course.title}</h3>
-                          {course.featured && <Star className="w-4 h-4 text-amber-500 dark:text-amber-400 fill-current" />}
+                          {featured && (
+                            <Star className="w-4 h-4 text-amber-500 dark:text-amber-400 fill-current" />
+                          )}
                         </div>
-                        <p className="text-slate-600 dark:text-slate-300 text-sm line-clamp-2">{course.description}</p>
+                        <p className="text-slate-600 dark:text-slate-300 text-sm line-clamp-2">
+                          {course.description}
+                        </p>
                       </div>
                     </div>
 
@@ -437,7 +497,7 @@ export default function EnhancedCoursesUI() {
                     {/* Actions */}
                     <div className="flex gap-2">
                       <button
-                        onClick={() => handleViewCourse(course.id!)}
+                        onClick={() => handleViewCourse(course.id)}
                         className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
                       >
                         <Eye className="w-4 h-4 inline mr-1" />
@@ -446,12 +506,16 @@ export default function EnhancedCoursesUI() {
                       <button
                         onClick={() => handleEditCourse(course)}
                         className="px-3 py-2 rounded-lg border bg-gray-100 hover:bg-gray-200 text-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-white dark:border-slate-600 transition-colors"
+                        aria-label="Edit course"
+                        title="Edit course"
                       >
                         <Edit3 className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleDeleteCourse(course.id!)}
+                        onClick={() => handleDeleteCourse(course.id)}
                         className="px-3 py-2 rounded-lg border bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-500/20 dark:hover:bg-red-500/30 dark:text-red-300 dark:border-red-500/30 transition-colors"
+                        aria-label="Delete course"
+                        title="Delete course"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -478,15 +542,24 @@ export default function EnhancedCoursesUI() {
                   {filteredAndSortedCourses.map((course) => {
                     const p = getDerivedProgress(course.id);
                     const lessonsCount = getDerivedLessonsCount(course.id);
+                    const featured = getCourseExtra(course).featured ?? false;
+
                     return (
-                      <tr key={course.id} className="border-b border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800/40 transition-colors">
+                      <tr
+                        key={course.id}
+                        className="border-b border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800/40 transition-colors"
+                      >
                         <td className="p-6">
                           <div>
                             <div className="flex items-center gap-2">
                               <h3 className="font-semibold">{course.title}</h3>
-                              {course.featured && <Star className="w-4 h-4 text-amber-500 dark:text-amber-400 fill-current" />}
+                              {featured && (
+                                <Star className="w-4 h-4 text-amber-500 dark:text-amber-400 fill-current" />
+                              )}
                             </div>
-                            <p className="text-slate-600 dark:text-slate-300 text-sm mt-1">{course.description}</p>
+                            <p className="text-slate-600 dark:text-slate-300 text-sm mt-1">
+                              {course.description}
+                            </p>
                           </div>
                         </td>
                         <td className="p-6">
@@ -514,7 +587,7 @@ export default function EnhancedCoursesUI() {
                         <td className="p-6">
                           <div className="flex justify-center gap-2">
                             <button
-                              onClick={() => handleViewCourse(course.id!)}
+                              onClick={() => handleViewCourse(course.id)}
                               className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm"
                             >
                               View
@@ -522,12 +595,16 @@ export default function EnhancedCoursesUI() {
                             <button
                               onClick={() => handleEditCourse(course)}
                               className="px-3 py-1 rounded-lg border bg-gray-100 hover:bg-gray-200 text-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-white dark:border-slate-600 transition-colors"
+                              aria-label="Edit course"
+                              title="Edit course"
                             >
                               <Edit3 className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => handleDeleteCourse(course.id!)}
+                              onClick={() => handleDeleteCourse(course.id)}
                               className="px-3 py-1 rounded-lg border bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-500/20 dark:hover:bg-red-500/30 dark:text-red-300 dark:border-red-500/30 transition-colors"
+                              aria-label="Delete course"
+                              title="Delete course"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -630,7 +707,10 @@ export default function EnhancedCoursesUI() {
                     type="number"
                     value={newCourse.estimatedHours}
                     onChange={(e) =>
-                      setNewCourse((prev) => ({ ...prev, estimatedHours: parseInt(e.target.value) || 0 }))
+                      setNewCourse((prev) => ({
+                        ...prev,
+                        estimatedHours: Number.parseInt(e.target.value || '0', 10),
+                      }))
                     }
                     className={inputBase}
                     placeholder="0"
@@ -672,7 +752,9 @@ export default function EnhancedCoursesUI() {
                   <input
                     type="text"
                     value={editCourseData.title}
-                    onChange={(e) => setEditCourseData({ ...editCourseData, title: e.target.value })}
+                    onChange={(e) =>
+                      setEditCourseData({ ...editCourseData, title: e.target.value })
+                    }
                     className={inputBase}
                   />
                 </div>
@@ -680,7 +762,9 @@ export default function EnhancedCoursesUI() {
                   <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Description</label>
                   <textarea
                     value={editCourseData.description}
-                    onChange={(e) => setEditCourseData({ ...editCourseData, description: e.target.value })}
+                    onChange={(e) =>
+                      setEditCourseData({ ...editCourseData, description: e.target.value })
+                    }
                     rows={3}
                     className={`${inputBase} resize-none`}
                   />
@@ -690,7 +774,9 @@ export default function EnhancedCoursesUI() {
                     <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Category</label>
                     <select
                       value={editCourseData.category}
-                      onChange={(e) => setEditCourseData({ ...editCourseData, category: e.target.value })}
+                      onChange={(e) =>
+                        setEditCourseData({ ...editCourseData, category: e.target.value })
+                      }
                       className={inputBase}
                     >
                       {categories.slice(1).map((cat) => (
@@ -704,7 +790,12 @@ export default function EnhancedCoursesUI() {
                     <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Difficulty</label>
                     <select
                       value={editCourseData.difficulty as Difficulty}
-                      onChange={(e) => setEditCourseData({ ...editCourseData, difficulty: e.target.value as Difficulty })}
+                      onChange={(e) =>
+                        setEditCourseData({
+                          ...editCourseData,
+                          difficulty: e.target.value as Difficulty,
+                        })
+                      }
                       className={inputBase}
                     >
                       {difficulties.map((diff) => (
@@ -716,11 +807,18 @@ export default function EnhancedCoursesUI() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">Estimated Hours</label>
+                  <label className="block text-sm font-medium mb-2 text-slate-700 dark:text-slate-300">
+                    Estimated Hours
+                  </label>
                   <input
                     type="number"
                     value={editCourseData.estimatedHours || 0}
-                    onChange={(e) => setEditCourseData({ ...editCourseData, estimatedHours: parseInt(e.target.value) || 0 })}
+                    onChange={(e) =>
+                      setEditCourseData({
+                        ...editCourseData,
+                        estimatedHours: Number.parseInt(e.target.value || '0', 10),
+                      })
+                    }
                     className={inputBase}
                     min={0}
                   />

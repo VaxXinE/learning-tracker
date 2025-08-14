@@ -1,9 +1,10 @@
+// src/app/profile/page.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   User, Mail, CalendarClock, ShieldCheck, Edit3, Loader2, Save, ImagePlus,
-  ShieldAlert, LogOut, Trash2, CheckCircle2, BookOpen, GraduationCap
+  ShieldAlert, LogOut, Trash2, CheckCircle2, BookOpen, GraduationCap,
 } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
 import { auth } from '@/lib/firebase';
@@ -14,25 +15,49 @@ import { CourseService, type Course } from '@/lib/firebase/courses';
 import { LessonService, type Lesson } from '@/lib/firebase/lessons';
 import { TaskService, type Task } from '@/lib/firebase/tasks';
 
-/* ===== Helpers: image URL normalizer & validator ===== */
-function isDirectImageURL(u: string) {
+/* ================= Helpers (tanpa any) ================= */
+
+function isDirectImageURL(u: string): boolean {
   return /^https?:\/\/.+\.(png|jpe?g|webp|gif|svg)(\?.*)?$/i.test(u);
 }
-function normalizePhotoUrl(u?: string | null) {
+function normalizePhotoUrl(u?: string | null): string {
   if (!u) return '';
   const trimmed = u.trim();
   if (isDirectImageURL(trimmed)) return trimmed;
-
-  // coba ekstrak dari link google images (?imgurl= atau ?url=)
   try {
     const parsed = new URL(trimmed);
     const candidate = parsed.searchParams.get('imgurl') || parsed.searchParams.get('url');
     if (candidate && isDirectImageURL(candidate)) return candidate;
-  } catch {}
+  } catch {
+    /* ignore parse error */
+  }
   return '';
 }
 
-/* ===== Reusable glass card ===== */
+type FireDate = Date | { toDate?: () => Date } | string | number | null | undefined;
+function asDate(value: FireDate): Date | undefined {
+  if (!value) return undefined;
+  if (value instanceof Date) return value;
+  if (typeof value === 'string') return new Date(value);
+  if (typeof value === 'number') return new Date(value);
+  if (typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+    const d = value.toDate();
+    return d instanceof Date ? d : undefined;
+  }
+  return undefined;
+}
+
+type LessonExtra = {
+  completed?: boolean;
+  status?: 'todo' | 'in_progress' | 'done';
+};
+function isLessonDone(l: Lesson): boolean {
+  const ex = l as unknown as LessonExtra;
+  return ex.status === 'done' || Boolean(ex.completed);
+}
+
+/* ================= Reusable UI ================= */
+
 function GlassCard({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
     <div
@@ -48,7 +73,6 @@ function GlassCard({ children, className = '' }: { children: React.ReactNode; cl
   );
 }
 
-/* ===== Avatar dengan fallback (gradient initial) ===== */
 function Avatar({
   name, photoURL, size = 72,
 }: { name?: string | null; photoURL?: string | null; size?: number }) {
@@ -80,7 +104,9 @@ function Avatar({
   );
 }
 
-export default function ProfilePage() {
+/* ================= Page ================= */
+
+export default function ProfilePage(): React.ReactElement {
   const { user } = useAuth();
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string>('');
@@ -98,35 +124,35 @@ export default function ProfilePage() {
 
   useEffect(() => {
     setMsg(''); setErr('');
-    if (user) {
-      setDisplayName(user.displayName || '');
-      setPhotoURL(user.photoURL || '');
-      // load stats
-      setLoadingStats(true);
-      (async () => {
-        try {
-          const [c, l, t] = await Promise.all([
-            CourseService.getCourses(user.uid),
-            LessonService.getLessons(user.uid),
-            TaskService.getTasks(user.uid),
-          ]);
-          setCourses(c); setLessons(l); setTasks(t);
-        } finally {
-          setLoadingStats(false);
-        }
-      })();
+    if (!user) return;
 
-      const unsubC = CourseService.subscribeToCourses(user.uid, setCourses);
-      const unsubL = LessonService.subscribeToLessons(user.uid, setLessons);
-      const unsubT = TaskService.subscribeToTasks(user.uid, setTasks);
-      return () => { unsubC(); unsubL(); unsubT(); };
-    }
+    setDisplayName(user.displayName || '');
+    setPhotoURL(user.photoURL || '');
+
+    setLoadingStats(true);
+    (async () => {
+      try {
+        const [c, l, t] = await Promise.all([
+          CourseService.getCourses(user.uid),
+          LessonService.getLessons(user.uid),
+          TaskService.getTasks(user.uid),
+        ]);
+        setCourses(c); setLessons(l); setTasks(t);
+      } finally {
+        setLoadingStats(false);
+      }
+    })();
+
+    const unsubC = CourseService.subscribeToCourses(user.uid, setCourses);
+    const unsubL = LessonService.subscribeToLessons(user.uid, setLessons);
+    const unsubT = TaskService.subscribeToTasks(user.uid, setTasks);
+    return () => { unsubC(); unsubL(); unsubT(); };
   }, [user]);
 
   const stats = useMemo(() => {
-    const courseCompleted = courses.filter(c => (c.progress ?? 0) === 100).length;
-    const lessonDone = lessons.filter((l: any) => l.status === 'done' || (l as any).completed).length;
-    const taskDone = tasks.filter(t => t.status === 'done').length;
+    const courseCompleted = courses.filter((c) => (c.progress ?? 0) === 100).length;
+    const lessonDone = lessons.filter((l) => isLessonDone(l)).length;
+    const taskDone = tasks.filter((t) => t.status === 'done').length;
     return {
       courses: courses.length,
       coursesCompleted: courseCompleted,
@@ -138,7 +164,6 @@ export default function ProfilePage() {
   }, [courses, lessons, tasks]);
 
   const previewURL = useMemo(() => {
-    // preview yang aman untuk ditampilkan
     const inputNormalized = normalizePhotoUrl(photoURL);
     if (inputNormalized) return inputNormalized;
     const fromUser = normalizePhotoUrl(user?.photoURL || '');
@@ -146,7 +171,6 @@ export default function ProfilePage() {
   }, [photoURL, user?.photoURL]);
 
   const photoInputInvalid = useMemo(() => {
-    // user mengisi sesuatu tapi bukan direct image
     if (!photoURL) return false;
     return !normalizePhotoUrl(photoURL);
   }, [photoURL]);
@@ -404,7 +428,7 @@ export default function ProfilePage() {
                     <div className="mt-1 flex flex-wrap gap-1">
                       {user.providerData.map((p, i) => (
                         <span
-                          key={i}
+                          key={`${p.providerId}-${i}`}
                           className="px-2 py-0.5 rounded-lg text-xs border
                                      bg-gray-100 text-slate-700
                                      dark:bg-slate-700/60 dark:text-slate-200 dark:border-slate-600"

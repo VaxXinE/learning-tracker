@@ -1,15 +1,29 @@
 // src/components/AppHeader.tsx
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { Menu, Sun, MoonStar, Search, LogOut, LayoutDashboard, BookOpen, User2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Menu,
+  Sun,
+  MoonStar,
+  Search,
+  LogOut,
+  LayoutDashboard,
+  BookOpen,
+  User2,
+} from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 import { useAuth } from '@/components/AuthProvider';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 
-export default function AppHeader({ onToggleSidebar }: { onToggleSidebar: () => void }) {
-  const { user, logout: ctxLogout }: any = useAuth();
-  const userLabel = user?.displayName || user?.email?.split('@')[0] || 'User';
+type AppHeaderProps = {
+  onToggleSidebar: () => void;
+};
+
+export default function AppHeader({ onToggleSidebar }: AppHeaderProps) {
+  const { user, logout } = useAuth(); // <- tidak ada `any` lagi
+  const userLabel =
+    user?.displayName || (user?.email ? user.email.split('@')[0] : '') || 'User';
   const initial = userLabel.charAt(0).toUpperCase();
 
   const router = useRouter();
@@ -37,7 +51,7 @@ export default function AppHeader({ onToggleSidebar }: { onToggleSidebar: () => 
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const onSubmit = (e: React.FormEvent) => {
+  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const query = q.trim();
     router.push(query ? `/search?q=${encodeURIComponent(query)}&scope=all` : `/search`);
@@ -50,10 +64,13 @@ export default function AppHeader({ onToggleSidebar }: { onToggleSidebar: () => 
   // close on outside click / Esc
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      const node = e.target as Node | null;
+      if (!menuRef.current || !node) return;
+      if (!menuRef.current.contains(node)) setMenuOpen(false);
     };
-    const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && setMenuOpen(false);
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
 
     if (menuOpen) {
       document.addEventListener('mousedown', onDocClick);
@@ -65,17 +82,18 @@ export default function AppHeader({ onToggleSidebar }: { onToggleSidebar: () => 
     };
   }, [menuOpen]);
 
-  const handleLogout = async () => {
+  const handleLogout = async (): Promise<void> => {
     try {
-      if (typeof ctxLogout === 'function') {
-        await ctxLogout();
+      if (typeof logout === 'function') {
+        await logout();
       } else {
-        // fallback langsung via Firebase
+        // fallback langsung via Firebase (jarang kepakai, tapi aman)
         const { getAuth, signOut } = await import('firebase/auth');
         await signOut(getAuth());
       }
       router.push('/');
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error('Logout error:', e);
     }
   };
@@ -89,6 +107,7 @@ export default function AppHeader({ onToggleSidebar }: { onToggleSidebar: () => 
             <button
               onClick={onToggleSidebar}
               className="md:hidden rounded-lg p-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+              aria-label="Toggle sidebar"
             >
               <Menu className="h-5 w-5 text-slate-700 dark:text-slate-200" />
             </button>
@@ -109,7 +128,9 @@ export default function AppHeader({ onToggleSidebar }: { onToggleSidebar: () => 
                 <input
                   ref={inputRef}
                   value={q}
-                  onChange={(e) => setQ(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setQ(e.target.value)
+                  }
                   placeholder="Search courses, lessons, tasks… (Ctrl/Cmd+K)"
                   className="w-full pl-9 pr-16 py-2 rounded-xl bg-gray-100/70 dark:bg-slate-800/60 border border-gray-200 dark:border-white/10 text-sm text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
@@ -150,19 +171,38 @@ export default function AppHeader({ onToggleSidebar }: { onToggleSidebar: () => 
                   className="absolute right-0 top-10 w-60 rounded-2xl border border-white/50 dark:border-white/10 bg-white/90 dark:bg-slate-900/90 backdrop-blur shadow-xl overflow-hidden"
                 >
                   <div className="px-4 py-3 border-b border-slate-200/70 dark:border-white/10">
-                    <div className="text-sm font-semibold text-slate-900 dark:text-white">{userLabel}</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">{user?.email}</div>
+                    <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                      {userLabel}
+                    </div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                      {user?.email}
+                    </div>
                   </div>
                   <div className="p-1">
-                    <MenuItem onClick={() => { setMenuOpen(false); router.push('/dashboard'); }}>
+                    <MenuItem
+                      onClick={() => {
+                        setMenuOpen(false);
+                        router.push('/dashboard');
+                      }}
+                    >
                       <LayoutDashboard className="h-4 w-4" />
                       <span>Dashboard</span>
                     </MenuItem>
-                    <MenuItem onClick={() => { setMenuOpen(false); router.push('/courses'); }}>
+                    <MenuItem
+                      onClick={() => {
+                        setMenuOpen(false);
+                        router.push('/courses');
+                      }}
+                    >
                       <BookOpen className="h-4 w-4" />
                       <span>My Courses</span>
                     </MenuItem>
-                    <MenuItem onClick={() => { setMenuOpen(false); router.push('/profile'); }}>
+                    <MenuItem
+                      onClick={() => {
+                        setMenuOpen(false);
+                        router.push('/profile');
+                      }}
+                    >
                       <User2 className="h-4 w-4" />
                       <span>Profile</span>
                     </MenuItem>
@@ -195,12 +235,13 @@ function MenuItem({
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm
-        ${danger
+      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
+        danger
           ? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10'
           : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'
-        }`}
+      }`}
       role="menuitem"
+      type="button"
     >
       {children}
     </button>
