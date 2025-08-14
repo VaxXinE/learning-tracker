@@ -77,6 +77,18 @@ type NewTaskPayload = {
   tags: string[];
 };
 
+// Tipe task dari service (id opsional, tags unknown)
+type ServiceTask = Omit<Task, 'id' | 'tags'> & { id?: string; tags?: unknown };
+
+// Normalisasi task agar sesuai interface lokal Task
+function normalizeTask(t: ServiceTask): Task {
+  return {
+    ...(t as Omit<Task, 'id' | 'tags'>),
+    id: t.id ?? (globalThis.crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`),
+    tags: Array.isArray(t.tags) ? (t.tags as string[]) : t.tags ? [String(t.tags)] : [],
+  };
+}
+
 /* ================= Pomodoro ================= */
 
 const PomodoroTimer: React.FC = () => {
@@ -182,10 +194,10 @@ const PomodoroTimer: React.FC = () => {
 
 export default function EnhancedTasksUI(): React.ReactElement {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedPriority, setSelectedPriority] = useState<'All' | Priority>('All');
-  const [selectedStatus, setSelectedStatus] = useState<'All' | Status>('All');
-  const [sortBy, setSortBy] = useState<'dueDate' | 'priority' | 'title' | 'createdAt'>('dueDate');
+  const [searchQuery] = useState<string>('');
+  const [selectedPriority] = useState<'All' | Priority>('All');
+  const [selectedStatus] = useState<'All' | Status>('All');
+  const [sortBy] = useState<'dueDate' | 'priority' | 'title' | 'createdAt'>('dueDate');
   const [draggedTask, setDraggedTask] = useState<Task | null>(null);
 
   const [newTask, setNewTask] = useState<TaskInput>({
@@ -211,11 +223,7 @@ export default function EnhancedTasksUI(): React.ReactElement {
     const unsubscribe = TaskService.subscribeToTasks(user.uid, (incoming) => {
       const normalized: Task[] = (incoming ?? [])
         .filter(Boolean)
-        .map((t: any) => ({
-          ...t,
-          id: t.id ?? (globalThis.crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`),
-          tags: Array.isArray(t.tags) ? t.tags : (t.tags ? [String(t.tags)] : []),
-        }));
+        .map((t) => normalizeTask(t as ServiceTask));
 
       setTasks(normalized);
       setLoading(false);
