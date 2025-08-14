@@ -37,7 +37,7 @@ type Status = 'todo' | 'in_progress' | 'done';
 type Priority = 'low' | 'medium' | 'high';
 
 interface Task {
-  id: string;
+  id: string; // kita normalkan agar selalu string
   title: string;
   description: string;
   status: Status;
@@ -205,10 +205,22 @@ export default function EnhancedTasksUI(): React.ReactElement {
       setLoading(false);
       return;
     }
-    const unsubscribe = TaskService.subscribeToTasks(user.uid, (docs: Task[] = []) => {
-      setTasks(docs.filter(Boolean));
+
+    // FIX TS2345: jangan beri anotasi tipe param di callback; biarkan infer dari service.
+    // Normalisasi id (jika undefined) dan tags agar memenuhi interface Task lokal (id: string).
+    const unsubscribe = TaskService.subscribeToTasks(user.uid, (incoming) => {
+      const normalized: Task[] = (incoming ?? [])
+        .filter(Boolean)
+        .map((t: any) => ({
+          ...t,
+          id: t.id ?? (globalThis.crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`),
+          tags: Array.isArray(t.tags) ? t.tags : (t.tags ? [String(t.tags)] : []),
+        }));
+
+      setTasks(normalized);
       setLoading(false);
     });
+
     return () => unsubscribe();
   }, [user]);
 

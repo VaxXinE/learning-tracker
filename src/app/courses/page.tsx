@@ -218,9 +218,9 @@ export default function EnhancedCoursesUI(): React.ReactElement {
     }
   };
 
-  // Delete
-  const handleDeleteCourse = async (courseId: string) => {
-    if (!user) return;
+  // Delete (REF: relax type + guard to fix TS2345)
+  const handleDeleteCourse = async (courseId?: string) => {
+    if (!user || !courseId) return; // guard terhadap undefined
     try {
       await CourseService.deleteCourse(courseId);
     } catch (error) {
@@ -441,7 +441,7 @@ export default function EnhancedCoursesUI(): React.ReactElement {
               const featured = getCourseExtra(course).featured ?? false;
 
               return (
-                <GlassCard key={course.id} className="hover:shadow-xl transition-all">
+                <GlassCard key={course.id ?? crypto.randomUUID()} className="hover:shadow-xl transition-all">
                   <div className="p-6">
                     {/* Header */}
                     <div className="flex items-start justify-between mb-4">
@@ -498,7 +498,9 @@ export default function EnhancedCoursesUI(): React.ReactElement {
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleViewCourse(course.id)}
-                        className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                        className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50"
+                        disabled={!course.id}
+                        aria-disabled={!course.id}
                       >
                         <Eye className="w-4 h-4 inline mr-1" />
                         View
@@ -513,9 +515,11 @@ export default function EnhancedCoursesUI(): React.ReactElement {
                       </button>
                       <button
                         onClick={() => handleDeleteCourse(course.id)}
-                        className="px-3 py-2 rounded-lg border bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-500/20 dark:hover:bg-red-500/30 dark:text-red-300 dark:border-red-500/30 transition-colors"
+                        className="px-3 py-2 rounded-lg border bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-500/20 dark:hover:bg-red-500/30 dark:text-red-300 dark:border-red-500/30 transition-colors disabled:opacity-50"
                         aria-label="Delete course"
                         title="Delete course"
+                        disabled={!course.id}
+                        aria-disabled={!course.id}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -546,7 +550,7 @@ export default function EnhancedCoursesUI(): React.ReactElement {
 
                     return (
                       <tr
-                        key={course.id}
+                        key={course.id ?? crypto.randomUUID()}
                         className="border-b border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800/40 transition-colors"
                       >
                         <td className="p-6">
@@ -588,7 +592,9 @@ export default function EnhancedCoursesUI(): React.ReactElement {
                           <div className="flex justify-center gap-2">
                             <button
                               onClick={() => handleViewCourse(course.id)}
-                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm"
+                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm disabled:opacity-50"
+                              disabled={!course.id}
+                              aria-disabled={!course.id}
                             >
                               View
                             </button>
@@ -602,9 +608,11 @@ export default function EnhancedCoursesUI(): React.ReactElement {
                             </button>
                             <button
                               onClick={() => handleDeleteCourse(course.id)}
-                              className="px-3 py-1 rounded-lg border bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-500/20 dark:hover:bg-red-500/30 dark:text-red-300 dark:border-red-500/30 transition-colors"
+                              className="px-3 py-1 rounded-lg border bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-500/20 dark:hover:bg-red-500/30 dark:text-red-300 dark:border-red-500/30 transition-colors text-sm disabled:opacity-50"
                               aria-label="Delete course"
                               title="Delete course"
+                              disabled={!course.id}
+                              aria-disabled={!course.id}
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
